@@ -1,0 +1,30 @@
+{
+  "name": "virginia-pos",
+  "version": "1.0.0",
+  "description": "Offline-first fast-food POS for single-outlet desktop operations.",
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/start-electron.js",
+    "lint": "echo \"No linter configured\"",
+    "db:reset": "node -e \"const fs=require('fs'); if(fs.existsSync('database/pos.db')) fs.unlinkSync('database/pos.db'); console.log('database reset');\"",
+    "rebuild-native": "node scripts/rebuild-native.js",
+    "postinstall": "node scripts/rebuild-native.js"
+  },
+  "keywords": [
+    "pos",
+    "electron",
+    "sqlite",
+    "offline"
+  ],
+  "author": "Generated from pos_plan.md",
+  "license": "MIT",
+  "dependencies": {
+    "@babel/standalone": "^7.27.7",
+    "@react-icons/all-files": "^4.1.0",
+    "better-sqlite3": "^11.8.1",
+    "electron": "^36.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-icons": "^5.5.0"
+  }
+}
