@@ -196,7 +196,13 @@ function buildReceiptData(orderId) {
 }
 
 function centsToMoney(cents) {
-  return (Number(cents || 0) / 100).toFixed(2);
+  return new Intl.NumberFormat("en-PK", {
+    style: "currency",
+    currency: "PKR",
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number(cents || 0) / 100);
 }
 
 function receiptHtml(data) {
@@ -206,7 +212,7 @@ function receiptHtml(data) {
       (item) => `
       <tr>
         <td>${escapeHtml(item.item_name)} x${item.quantity}</td>
-        <td style="text-align:right">$${centsToMoney(item.line_total_cents)}</td>
+        <td style="text-align:right">${centsToMoney(item.line_total_cents)}</td>
       </tr>`
     )
     .join("");
@@ -235,11 +241,11 @@ function receiptHtml(data) {
       <div class="muted">Phone: ${escapeHtml(order.customer_phone || "-")}</div>
       <table><tbody>${rows}</tbody></table>
       <div class="totals">
-        <div class="line"><span>Subtotal</span><span>$${centsToMoney(order.subtotal_cents)}</span></div>
-        <div class="line"><span>Discount</span><span>$${centsToMoney(order.discount_cents)}</span></div>
-        <div class="line total"><span>Total</span><span>$${centsToMoney(order.total_cents)}</span></div>
-        <div class="line"><span>Cash Received</span><span>$${centsToMoney(payment?.received_cents)}</span></div>
-        <div class="line"><span>Change</span><span>$${centsToMoney(payment?.change_cents)}</span></div>
+        <div class="line"><span>Subtotal</span><span>${centsToMoney(order.subtotal_cents)}</span></div>
+        <div class="line"><span>Discount</span><span>${centsToMoney(order.discount_cents)}</span></div>
+        <div class="line total"><span>Total</span><span>${centsToMoney(order.total_cents)}</span></div>
+        <div class="line"><span>Cash Received</span><span>${centsToMoney(payment?.received_cents)}</span></div>
+        <div class="line"><span>Change</span><span>${centsToMoney(payment?.change_cents)}</span></div>
       </div>
     </body>
   </html>`;

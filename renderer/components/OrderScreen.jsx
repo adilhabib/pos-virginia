@@ -52,6 +52,9 @@
     async function ensureOrder() {
       if (orderId) return orderId;
       const id = await window.POSUtils.orders.createOrder(user.id, "");
+      if (customerName.trim() || customerPhone.trim()) {
+        await window.POSUtils.orders.updateOrderCustomer(id, customerName, customerPhone, user.id);
+      }
       setOrderId(id);
       await refreshOrder(id);
       return id;

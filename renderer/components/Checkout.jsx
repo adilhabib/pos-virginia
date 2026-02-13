@@ -112,7 +112,7 @@
                         <td>{money(item.unit_price_cents)}</td>
                         <td>{item.quantity}</td>
                         <td>{money(item.line_total_cents)}</td>
-                        <td><button className="trash-btn" onClick={() => removeItem(item)}>🗑</button></td>
+                        <td><button className="trash-btn" onClick={() => removeItem(item)}>Del</button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -175,3 +175,4 @@
   window.POSComponents = window.POSComponents || {};
   window.POSComponents.Checkout = Checkout;
 })();
+

@@ -1,5 +1,13 @@
 (function () {
-  const money = (cents) => `$${(Number(cents || 0) / 100).toFixed(2)}`;
+  const pkrFormatter = new Intl.NumberFormat("en-PK", {
+    style: "currency",
+    currency: "PKR",
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+
+  const money = (cents) => pkrFormatter.format(Number(cents || 0) / 100);
 
   function assertOk(resp) {
     if (!resp || resp.ok !== true) {
