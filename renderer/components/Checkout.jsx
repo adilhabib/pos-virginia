@@ -3,8 +3,7 @@
   const { money } = window.POSUtils.db;
 
   function Checkout({ user, selectedOrder, onPaid }) {
-    const [received, setReceived] = useState("45");
-    const [discount, setDiscount] = useState("");
+    const [received, setReceived] = useState("");
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
     const [processing, setProcessing] = useState(false);
@@ -13,22 +12,22 @@
 
     useEffect(() => {
       setOrderData(selectedOrder || null);
-      setDiscount(selectedOrder?.order ? ((selectedOrder.order.discount_cents || 0) / 100).toFixed(2) : "");
     }, [selectedOrder]);
 
     const order = orderData?.order;
     const items = orderData?.items || [];
     const subtotal = order?.subtotal_cents || 0;
     const discountCents = order?.discount_cents || 0;
-    const orderTotal = order?.total_cents || 0;
+    const orderTotal = Math.max(0, order?.total_cents || 0);
     const payable = orderTotal;
     const receivedCents = useMemo(() => Math.round(Number(received || 0) * 100), [received]);
-    const changeCents = Math.max(0, receivedCents - orderTotal);
+    const changeCents = Math.max(0, receivedCents - payable);
 
     async function refreshOrder() {
       if (!order?.id) return;
       const refreshed = await window.POSUtils.orders.getOrder(order.id);
       setOrderData({ order: refreshed.order, items: refreshed.items });
+      return refreshed;
     }
 
     async function removeItem(item) {
@@ -59,6 +58,8 @@
       setMessage("");
       setProcessing(true);
       try {
+        if (receivedCents < orderTotal) throw new Error("Received cash is less than total.");
+
         if (order.status !== "FINALIZED") {
           await window.POSUtils.orders.setOrderStatus(order.id, "FINALIZED", user.id);
         }
@@ -74,17 +75,6 @@
         setError(err.message || "Payment failed.");
       } finally {
         setProcessing(false);
-      }
-    }
-
-    async function saveDiscount() {
-      if (!order?.id) return;
-      setError("");
-      try {
-        await window.POSUtils.orders.updateOrderDiscount(order.id, Math.round(Number(discount || 0) * 100), user.id);
-        await refreshOrder();
-      } catch (err) {
-        setError(err.message || "Unable to save discount.");
       }
     }
 
@@ -140,11 +130,6 @@
               <div className="cash-box">
                 <span>ADD CASH RECEIVED</span>
                 <input value={received} onChange={(e) => setReceived(e.target.value)} />
-              </div>
-
-              <div className="cash-box">
-                <span>DISCOUNT (MANUAL)</span>
-                <input value={discount} onChange={(e) => setDiscount(e.target.value)} onBlur={saveDiscount} />
               </div>
 
               <div className="pay-lines">

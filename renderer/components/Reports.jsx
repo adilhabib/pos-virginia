@@ -122,6 +122,62 @@
 
         <div className="card">
           <h2>Sessions & Summary</h2>
+          <h3>End-of-Day Close (Today)</h3>
+          <table className="table">
+            <tbody>
+              <tr><td>Opening Float</td><td>{money(summary?.eodClose?.openingFloat || 0)}</td></tr>
+              <tr><td>Cash In</td><td>{money(summary?.eodClose?.cashIn || 0)}</td></tr>
+              <tr><td>Cash Out</td><td>{money(summary?.eodClose?.cashOut || 0)}</td></tr>
+              <tr><td>Expected Close</td><td>{money(summary?.eodClose?.expectedClose || 0)}</td></tr>
+              <tr><td>Actual Closed</td><td>{money(summary?.eodClose?.actualClose || 0)}</td></tr>
+              <tr><td>Variance</td><td>{money(summary?.eodClose?.variance || 0)}</td></tr>
+              <tr><td>Closed Sessions</td><td>{summary?.eodClose?.closedSessions || 0}</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Cashier-wise Sales ({range})</h3>
+          <table className="table">
+            <thead>
+              <tr><th>Cashier</th><th>Paid Orders</th><th>Sales</th></tr>
+            </thead>
+            <tbody>
+              {(summary?.cashierSales || []).map((c) => (
+                <tr key={`cashier-${c.cashier || "unknown"}`}>
+                  <td>{c.cashier || "-"}</td>
+                  <td>{c.paid_orders}</td>
+                  <td>{money(c.gross_sales)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3>Category Margin ({range})</h3>
+          <table className="table">
+            <thead>
+              <tr><th>Category</th><th>Net Sales</th><th>Est. Cost</th><th>Gross Margin</th></tr>
+            </thead>
+            <tbody>
+              {(summary?.categoryMargin || []).map((c) => (
+                <tr key={`cat-${c.category}`}>
+                  <td>{c.category}</td>
+                  <td>{money(c.net_sales_cents)}</td>
+                  <td>{money(c.estimated_cost_cents)}</td>
+                  <td>{money(c.gross_margin_cents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3>Tax Summary ({range})</h3>
+          <table className="table">
+            <tbody>
+              <tr><td>Taxable Sales</td><td>{money(summary?.taxSummary?.taxable_sales_cents || 0)}</td></tr>
+              <tr><td>Total Discount</td><td>{money(summary?.taxSummary?.total_discount_cents || 0)}</td></tr>
+              <tr><td>Tax Collected</td><td>{money(summary?.taxSummary?.tax_collected_cents || 0)}</td></tr>
+              <tr><td>Net Sales</td><td>{money(summary?.taxSummary?.net_sales_cents || 0)}</td></tr>
+            </tbody>
+          </table>
+
           <h3>Cash Sessions (Today)</h3>
           <table className="table">
             <thead>

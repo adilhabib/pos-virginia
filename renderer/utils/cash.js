@@ -13,8 +13,8 @@
     return assertOk(await window.posAPI.addCashTransaction({ sessionId, type, amountCents, reason, userId }));
   }
 
-  async function closeSession(sessionId, userId, actualClosingCents) {
-    return assertOk(await window.posAPI.closeCashSession({ sessionId, userId, actualClosingCents }));
+  async function closeSession(sessionId, userId, actualClosingCents, denominationCounts = null) {
+    return assertOk(await window.posAPI.closeCashSession({ sessionId, userId, actualClosingCents, denominationCounts }));
   }
 
   window.POSUtils = window.POSUtils || {};

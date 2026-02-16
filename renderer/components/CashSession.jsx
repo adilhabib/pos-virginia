@@ -1,14 +1,20 @@
 (function () {
-  const { useEffect, useState } = React;
+  const { useEffect, useMemo, useState } = React;
   const { money } = window.POSUtils.db;
+  const DENOMS = [5000, 1000, 500, 100, 50, 20, 10, 5, 2, 1];
 
   function CashSession({ user }) {
     const [sessionResp, setSessionResp] = useState({ session: null, totals: null });
     const [opening, setOpening] = useState("");
-    const [actualClosing, setActualClosing] = useState("");
     const [txnType, setTxnType] = useState("OUT");
     const [txnAmount, setTxnAmount] = useState("");
     const [txnReason, setTxnReason] = useState("");
+    const [denominationCounts, setDenominationCounts] = useState(() =>
+      DENOMS.reduce((acc, d) => {
+        acc[d] = "";
+        return acc;
+      }, {})
+    );
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
 
@@ -59,20 +65,26 @@
       if (!sessionResp.session) return;
       setError("");
       setMessage("");
-      if (!actualClosing || Number(actualClosing) <= 0) {
-        setError("Enter total counted cash before closing shift.");
+      if (countedTotalCents <= 0) {
+        setError("Enter denomination counts before closing shift.");
         return;
       }
       try {
         const out = await window.POSUtils.cash.closeSession(
           sessionResp.session.id,
           user.id,
-          Math.round(Number(actualClosing || 0) * 100)
+          countedTotalCents,
+          denominationCounts
         );
         setMessage(
           `Closed. Expected ${money(out.expected)} | Actual ${money(out.actual)} | Variance ${money(out.variance)}`
         );
-        setActualClosing("");
+        setDenominationCounts(
+          DENOMS.reduce((acc, d) => {
+            acc[d] = "";
+            return acc;
+          }, {})
+        );
         await load();
       } catch (err) {
         setError(err.message || "Unable to close session.");
@@ -82,7 +94,19 @@
     const open = sessionResp.session;
     const inTotal = (sessionResp.totals?.inOut || []).find((x) => x.transaction_type === "IN")?.total || 0;
     const outTotal = (sessionResp.totals?.inOut || []).find((x) => x.transaction_type === "OUT")?.total || 0;
-    const expectedClose = open ? Number(open.opening_cents || 0) + Number(inTotal) - Number(outTotal) : 0;
+    const countedTotalCents = useMemo(
+      () =>
+        DENOMS.reduce((sum, denom) => {
+          const count = Number(denominationCounts[denom] || 0);
+          return sum + (Number.isFinite(count) ? Math.max(0, Math.floor(count)) * denom * 100 : 0);
+        }, 0),
+      [denominationCounts]
+    );
+
+    function updateCount(denom, value) {
+      setDenominationCounts((prev) => ({ ...prev, [denom]: value }));
+    }
+
     return (
       <div className="screen-grid">
         <div className="card">
@@ -100,7 +124,6 @@
               <p>Opening: {money(open.opening_cents)}</p>
               <p>Total In: {money(inTotal)}</p>
               <p>Total Out: {money(outTotal)}</p>
-              <p>Expected Close Cash: <strong>{money(expectedClose)}</strong></p>
               <p>Status: <strong>{open.status}</strong></p>
 
               <label>Transaction type</label>
@@ -115,8 +138,27 @@
               <button onClick={addTxn}>Add Transaction</button>
 
               <hr />
-              <label>Total counted cash at close</label>
-              <input value={actualClosing} onChange={(e) => setActualClosing(e.target.value)} placeholder="450.00" />
+              <h3>Blind Close Denomination Count</h3>
+              <table className="table">
+                <thead>
+                  <tr><th>Denomination</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                  {DENOMS.map((d) => (
+                    <tr key={d}>
+                      <td>{money(d * 100)}</td>
+                      <td>
+                        <input
+                          value={denominationCounts[d]}
+                          onChange={(e) => updateCount(d, e.target.value)}
+                          placeholder="0"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p>Total counted cash: <strong>{money(countedTotalCents)}</strong></p>
               <button className="primary" onClick={closeSession}>Close Shift</button>
             </>
           )}

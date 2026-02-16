@@ -23,6 +23,8 @@
     const [orderData, setOrderData] = useState(null);
     const [customerName, setCustomerName] = useState("");
     const [customerPhone, setCustomerPhone] = useState("");
+    const [discountMode, setDiscountMode] = useState("amount");
+    const [discountValue, setDiscountValue] = useState("");
     const [activeTab, setActiveTab] = useState("ALL");
     const [showEditor, setShowEditor] = useState(false);
     const [newName, setNewName] = useState("");
@@ -46,6 +48,8 @@
       setOrderData(resp);
       setCustomerName(resp.order.customer_name || "");
       setCustomerPhone(resp.order.customer_phone || "");
+      setDiscountMode("amount");
+      setDiscountValue(((resp.order.discount_cents || 0) / 100).toFixed(2));
       onOrderSelected(resp.order, resp.items);
     }
 
@@ -88,6 +92,18 @@
         await refreshOrder(orderId);
       } catch (err) {
         setError(err.message || "Unable to update quantity.");
+      }
+    }
+
+    async function applyDiscount() {
+      const id = await ensureOrder();
+      setError("");
+      try {
+        await window.POSUtils.orders.updateOrderDiscount(id, dynamicDiscountCents, user.id);
+        await refreshOrder(id);
+        setStatusMsg("Discount applied.");
+      } catch (err) {
+        setError(err.message || "Unable to apply discount.");
       }
     }
 
@@ -228,6 +244,12 @@
     const subtotal = orderData?.order?.subtotal_cents || 0;
     const discount = orderData?.order?.discount_cents || 0;
     const total = orderData?.order?.total_cents || 0;
+    const discountNumeric = Number(discountValue || 0);
+    const requestedDiscountCents = discountMode === "percent"
+      ? Math.round((subtotal * Math.max(0, discountNumeric)) / 100)
+      : Math.round(Math.max(0, discountNumeric) * 100);
+    const dynamicDiscountCents = Math.min(requestedDiscountCents, subtotal);
+    const dynamicTotal = Math.max(0, subtotal - dynamicDiscountCents);
     const guestLabel = customerName.trim() ? customerName.trim() : "Guest";
     const mobileLabel = customerPhone.trim() ? customerPhone.trim() : "-";
 
@@ -364,6 +386,21 @@
               onBlur={saveCustomerIfPossible}
             />
           </div>
+          <div className="summary-discount-controls">
+            <span>DYNAMIC DISCOUNT</span>
+            <div className="row">
+              <select value={discountMode} onChange={(e) => setDiscountMode(e.target.value)}>
+                <option value="amount">Amount</option>
+                <option value="percent">Percent (%)</option>
+              </select>
+              <input
+                value={discountValue}
+                onChange={(e) => setDiscountValue(e.target.value)}
+                placeholder={discountMode === "percent" ? "10" : "100.00"}
+              />
+              <button onClick={applyDiscount}>Apply</button>
+            </div>
+          </div>
 
           <div className="summary-items">
             {billItems.length === 0 ? (
@@ -391,7 +428,9 @@
 
           <div className="summary-totals">
             <div><span>SUBTOTAL</span><b>{money(subtotal)}</b></div>
-            <div><span>DISCOUNT</span><b>{money(discount)}</b></div>
+            <div><span>DISCOUNT (APPLIED)</span><b>{money(discount)}</b></div>
+            <div><span>DISCOUNT (PREVIEW)</span><b>{money(dynamicDiscountCents)}</b></div>
+            <div><span>TOTAL (PREVIEW)</span><b>{money(dynamicTotal)}</b></div>
             <div className="grand"><span>TOTAL</span><b>{money(total)}</b></div>
           </div>
 

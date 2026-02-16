@@ -71,6 +71,14 @@ function ensureSchemaMigrations() {
   if (!orderCols.includes("customer_phone")) {
     db.exec("ALTER TABLE orders ADD COLUMN customer_phone TEXT");
   }
+  const cashSessionCols = db.prepare("PRAGMA table_info(cash_sessions)").all().map((c) => c.name);
+  if (!cashSessionCols.includes("denomination_json")) {
+    db.exec("ALTER TABLE cash_sessions ADD COLUMN denomination_json TEXT");
+  }
+  const ingredientCols = db.prepare("PRAGMA table_info(ingredients)").all().map((c) => c.name);
+  if (!ingredientCols.includes("unit_cost_cents")) {
+    db.exec("ALTER TABLE ingredients ADD COLUMN unit_cost_cents INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 function writeAudit(userId, action, payload = null) {
@@ -268,11 +276,17 @@ async function generateReceiptPdf(orderId) {
     const html = receiptHtml(data);
     await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
-    const pdf = await printWin.webContents.printToPDF({
-      printBackground: true,
-      pageSize: "A6",
-      margins: { top: 250, bottom: 250, left: 250, right: 250 }
-    });
+    let pdf;
+    try {
+      pdf = await printWin.webContents.printToPDF({
+        printBackground: true,
+        pageSize: "A6"
+      });
+    } catch (_) {
+      pdf = await printWin.webContents.printToPDF({
+        printBackground: true
+      });
+    }
 
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const filePath = path.join(RECEIPTS_DIR, `receipt-order-${orderId}-${stamp}.pdf`);
@@ -394,6 +408,8 @@ function registerIpc() {
   });
 
   ipcMain.handle("orders:create", (_, { cashierUserId, notes }) => {
+    const openSessionId = currentCashSessionId();
+    if (!openSessionId) return { ok: false, error: "Open a cash shift before creating orders." };
     const stmt = db.prepare(
       `INSERT INTO orders
        (status, subtotal_cents, tax_cents, total_cents, cashier_user_id, notes, created_at, updated_at)
@@ -621,7 +637,7 @@ function registerIpc() {
   ipcMain.handle("inventory:list", () => {
     const rows = db
       .prepare(
-        `SELECT id, name, unit, stock_qty, low_stock_threshold, supplier, updated_at
+        `SELECT id, name, unit, stock_qty, unit_cost_cents, low_stock_threshold, supplier, updated_at
          FROM ingredients
          ORDER BY name`
       )
@@ -670,19 +686,20 @@ function registerIpc() {
   });
 
   ipcMain.handle("inventory:create-ingredient", (_, payload = {}) => {
-    const { userId, name, unit, stockQty, lowStockThreshold, supplier } = payload;
+    const { userId, name, unit, stockQty, unitCostCents, lowStockThreshold, supplier } = payload;
     if (!isAdminOrManager(userId)) return { ok: false, error: "Only admin/manager can create ingredients." };
     if (!name || !unit) return { ok: false, error: "Name and unit are required." };
 
     const result = db
       .prepare(
-        `INSERT INTO ingredients (name, unit, stock_qty, low_stock_threshold, supplier, updated_at)
-         VALUES (?, ?, ?, ?, ?, datetime('now'))`
+        `INSERT INTO ingredients (name, unit, stock_qty, unit_cost_cents, low_stock_threshold, supplier, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
       )
       .run(
         String(name).trim(),
         String(unit).trim(),
         Number(stockQty || 0),
+        Math.max(0, Math.round(Number(unitCostCents || 0))),
         Number(lowStockThreshold || 0),
         supplier ? String(supplier).trim() : null
       );
@@ -691,6 +708,7 @@ function registerIpc() {
       name,
       unit,
       stockQty,
+      unitCostCents,
       lowStockThreshold,
       supplier
     });
@@ -698,23 +716,24 @@ function registerIpc() {
   });
 
   ipcMain.handle("inventory:update-ingredient", (_, payload = {}) => {
-    const { userId, ingredientId, name, unit, lowStockThreshold, supplier } = payload;
+    const { userId, ingredientId, name, unit, unitCostCents, lowStockThreshold, supplier } = payload;
     if (!isAdminOrManager(userId)) return { ok: false, error: "Only admin/manager can update ingredients." };
     const item = db.prepare("SELECT id FROM ingredients WHERE id = ?").get(ingredientId);
     if (!item) return { ok: false, error: "Ingredient not found." };
 
     db.prepare(
       `UPDATE ingredients
-       SET name = ?, unit = ?, low_stock_threshold = ?, supplier = ?, updated_at = datetime('now')
+       SET name = ?, unit = ?, unit_cost_cents = ?, low_stock_threshold = ?, supplier = ?, updated_at = datetime('now')
        WHERE id = ?`
     ).run(
       String(name).trim(),
       String(unit).trim(),
+      Math.max(0, Math.round(Number(unitCostCents || 0))),
       Number(lowStockThreshold || 0),
       supplier ? String(supplier).trim() : null,
       ingredientId
     );
-    writeAudit(userId, "INGREDIENT_UPDATED", { ingredientId, name, unit, lowStockThreshold, supplier });
+    writeAudit(userId, "INGREDIENT_UPDATED", { ingredientId, name, unit, unitCostCents, lowStockThreshold, supplier });
     return { ok: true };
   });
 
@@ -766,7 +785,7 @@ function registerIpc() {
     return { ok: true };
   });
 
-  ipcMain.handle("cash:close-session", (_, { sessionId, userId, actualClosingCents }) => {
+  ipcMain.handle("cash:close-session", (_, { sessionId, userId, actualClosingCents, denominationCounts }) => {
     const session = db.prepare("SELECT * FROM cash_sessions WHERE id = ? AND status='OPEN'").get(sessionId);
     if (!session) return { ok: false, error: "Open session not found." };
 
@@ -794,10 +813,10 @@ function registerIpc() {
 
     db.prepare(
       `UPDATE cash_sessions
-       SET closed_by_user_id = ?, closing_cents = ?, expected_closing_cents = ?, variance_cents = ?,
+       SET closed_by_user_id = ?, closing_cents = ?, expected_closing_cents = ?, variance_cents = ?, denomination_json = ?,
            closed_at = datetime('now'), status='CLOSED'
        WHERE id = ?`
-    ).run(userId, actual, expected, variance, sessionId);
+    ).run(userId, actual, expected, variance, denominationCounts ? JSON.stringify(denominationCounts) : null, sessionId);
 
     writeAudit(userId, "CASH_SESSION_CLOSED", { sessionId, expected, actual, variance });
     return { ok: true, expected, actual, variance };
@@ -832,6 +851,100 @@ function registerIpc() {
       )
       .all();
 
+    const cashierSales = db
+      .prepare(
+        `SELECT u.username AS cashier,
+                COUNT(*) AS paid_orders,
+                COALESCE(SUM(o.total_cents),0) AS gross_sales
+         FROM orders o
+         LEFT JOIN users u ON u.id = o.cashier_user_id
+         WHERE o.status='PAID' AND date(o.created_at) >= ${sinceExpr}
+         GROUP BY u.username
+         ORDER BY gross_sales DESC`
+      )
+      .all();
+
+    const categoryMargin = db
+      .prepare(
+        `SELECT mi.category,
+                ROUND(SUM(oi.line_total_cents - (
+                  CASE
+                    WHEN o.subtotal_cents > 0 THEN (oi.line_total_cents * 1.0 * o.discount_cents / o.subtotal_cents)
+                    ELSE 0
+                  END
+                ))) AS net_sales_cents,
+                ROUND(SUM(COALESCE(r.qty_per_item,0) * oi.quantity * COALESCE(i.unit_cost_cents,0))) AS estimated_cost_cents
+         FROM order_items oi
+         JOIN orders o ON o.id = oi.order_id
+         JOIN menu_items mi ON mi.id = oi.menu_item_id
+         LEFT JOIN recipes r ON r.menu_item_id = oi.menu_item_id
+         LEFT JOIN ingredients i ON i.id = r.ingredient_id
+         WHERE o.status='PAID' AND date(o.created_at) >= ${sinceExpr}
+         GROUP BY mi.category
+         ORDER BY net_sales_cents DESC`
+      )
+      .all()
+      .map((r) => ({
+        ...r,
+        gross_margin_cents: Number(r.net_sales_cents || 0) - Number(r.estimated_cost_cents || 0)
+      }));
+
+    const taxSummary = db
+      .prepare(
+        `SELECT COALESCE(SUM(subtotal_cents),0) AS taxable_sales_cents,
+                COALESCE(SUM(discount_cents),0) AS total_discount_cents,
+                COALESCE(SUM(tax_cents),0) AS tax_collected_cents,
+                COALESCE(SUM(total_cents),0) AS net_sales_cents
+         FROM orders
+         WHERE status='PAID' AND date(created_at) >= ${sinceExpr}`
+      )
+      .get();
+
+    const eodClose = (() => {
+      const openingFloat = db
+        .prepare(
+          `SELECT COALESCE(SUM(opening_cents),0) AS total
+           FROM cash_sessions
+           WHERE date(opened_at, 'localtime') = date('now', 'localtime')`
+        )
+        .get().total;
+      const cashIn = db
+        .prepare(
+          `SELECT COALESCE(SUM(amount_cents),0) AS total
+           FROM cash_transactions
+           WHERE transaction_type='IN'
+             AND date(created_at, 'localtime') = date('now', 'localtime')`
+        )
+        .get().total;
+      const cashOut = db
+        .prepare(
+          `SELECT COALESCE(SUM(amount_cents),0) AS total
+           FROM cash_transactions
+           WHERE transaction_type='OUT'
+             AND date(created_at, 'localtime') = date('now', 'localtime')`
+        )
+        .get().total;
+      const expectedClose = Number(openingFloat || 0) + Number(cashIn || 0) - Number(cashOut || 0);
+      const actualClose = db
+        .prepare(
+          `SELECT COALESCE(SUM(closing_cents),0) AS total
+           FROM cash_sessions
+           WHERE closed_at IS NOT NULL
+             AND date(closed_at, 'localtime') = date('now', 'localtime')`
+        )
+        .get().total;
+      const variance = Number(actualClose || 0) - Number(expectedClose || 0);
+      const closedSessions = db
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM cash_sessions
+           WHERE status='CLOSED'
+             AND date(closed_at, 'localtime') = date('now', 'localtime')`
+        )
+        .get().count;
+      return { openingFloat, cashIn, cashOut, expectedClose, actualClose, variance, closedSessions };
+    })();
+
     const lowStock = db
       .prepare(
         `SELECT id, name, stock_qty, low_stock_threshold
@@ -862,7 +975,7 @@ function registerIpc() {
 
     return {
       ok: true,
-      summary: { sales, topItems, lowStock, cash, audit }
+      summary: { sales, topItems, cashierSales, categoryMargin, taxSummary, eodClose, lowStock, cash, audit }
     };
   });
 

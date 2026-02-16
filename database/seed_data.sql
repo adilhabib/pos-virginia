@@ -17,17 +17,17 @@ INSERT INTO menu_items (name, category, price_cents, active) VALUES
 ('Soda', 'Drinks', 199, 1),
 ('Iced Tea', 'Drinks', 249, 1);
 
-INSERT INTO ingredients (name, unit, stock_qty, low_stock_threshold, supplier) VALUES
-('Burger Bun', 'pcs', 300, 40, 'Local Bakery'),
-('Beef Patty', 'pcs', 220, 30, 'Prime Meats'),
-('Chicken Patty', 'pcs', 180, 25, 'Poultry Supply Co'),
-('Cheese Slice', 'pcs', 250, 35, 'Dairy Hub'),
-('Lettuce', 'g', 5000, 800, 'Fresh Farm'),
-('Tomato', 'g', 4500, 700, 'Fresh Farm'),
-('Fries Potato', 'g', 16000, 2500, 'AgriFoods'),
-('Cooking Oil', 'ml', 15000, 3000, 'Oil Traders'),
-('Soda Syrup', 'ml', 13000, 2500, 'Beverage Partners'),
-('Tea Mix', 'g', 3000, 500, 'Beverage Partners');
+INSERT INTO ingredients (name, unit, stock_qty, unit_cost_cents, low_stock_threshold, supplier) VALUES
+('Burger Bun', 'pcs', 300, 45, 40, 'Local Bakery'),
+('Beef Patty', 'pcs', 220, 220, 30, 'Prime Meats'),
+('Chicken Patty', 'pcs', 180, 180, 25, 'Poultry Supply Co'),
+('Cheese Slice', 'pcs', 250, 35, 35, 'Dairy Hub'),
+('Lettuce', 'g', 5000, 1, 800, 'Fresh Farm'),
+('Tomato', 'g', 4500, 1, 700, 'Fresh Farm'),
+('Fries Potato', 'g', 16000, 1, 2500, 'AgriFoods'),
+('Cooking Oil', 'ml', 15000, 1, 3000, 'Oil Traders'),
+('Soda Syrup', 'ml', 13000, 1, 2500, 'Beverage Partners'),
+('Tea Mix', 'g', 3000, 2, 500, 'Beverage Partners');
 
 INSERT INTO recipes (menu_item_id, ingredient_id, qty_per_item) VALUES
 (1, 1, 1), (1, 2, 1), (1, 5, 20), (1, 6, 20),

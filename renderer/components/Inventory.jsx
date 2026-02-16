@@ -12,10 +12,12 @@
     const [activeEditorId, setActiveEditorId] = useState("");
     const [editName, setEditName] = useState("");
     const [editUnit, setEditUnit] = useState("");
+    const [editUnitCost, setEditUnitCost] = useState("");
     const [editThreshold, setEditThreshold] = useState("");
     const [editSupplier, setEditSupplier] = useState("");
     const [newName, setNewName] = useState("");
     const [newUnit, setNewUnit] = useState("");
+    const [newUnitCost, setNewUnitCost] = useState("");
     const [newStock, setNewStock] = useState("");
     const [newThreshold, setNewThreshold] = useState("");
     const [newSupplier, setNewSupplier] = useState("");
@@ -39,6 +41,7 @@
       setActiveEditorId(String(ingredient.id));
       setEditName(ingredient.name);
       setEditUnit(ingredient.unit);
+      setEditUnitCost(String(ingredient.unit_cost_cents || 0));
       setEditThreshold(String(ingredient.low_stock_threshold));
       setEditSupplier(ingredient.supplier || "");
     }
@@ -79,12 +82,14 @@
           name: newName,
           unit: newUnit,
           stockQty: Number(newStock || 0),
+          unitCostCents: Number(newUnitCost || 0),
           lowStockThreshold: Number(newThreshold || 0),
           supplier: newSupplier
         });
         setMessage("Ingredient created.");
         setNewName("");
         setNewUnit("");
+        setNewUnitCost("");
         setNewStock("");
         setNewThreshold("");
         setNewSupplier("");
@@ -101,6 +106,7 @@
         await window.POSUtils.inventory.updateIngredient(user.id, Number(activeEditorId), {
           name: editName,
           unit: editUnit,
+          unitCostCents: Number(editUnitCost || 0),
           lowStockThreshold: Number(editThreshold || 0),
           supplier: editSupplier
         });
@@ -174,6 +180,8 @@
           <input value={newUnit} onChange={(e) => setNewUnit(e.target.value)} placeholder="pcs, g, ml" />
           <label>Opening Stock</label>
           <input value={newStock} onChange={(e) => setNewStock(e.target.value)} />
+          <label>Unit Cost (cents)</label>
+          <input value={newUnitCost} onChange={(e) => setNewUnitCost(e.target.value)} />
           <label>Low Stock Threshold</label>
           <input value={newThreshold} onChange={(e) => setNewThreshold(e.target.value)} />
           <label>Supplier</label>
@@ -191,6 +199,8 @@
               <input value={editName} onChange={(e) => setEditName(e.target.value)} />
               <label>Unit</label>
               <input value={editUnit} onChange={(e) => setEditUnit(e.target.value)} />
+              <label>Unit Cost (cents)</label>
+              <input value={editUnitCost} onChange={(e) => setEditUnitCost(e.target.value)} />
               <label>Low Stock Threshold</label>
               <input value={editThreshold} onChange={(e) => setEditThreshold(e.target.value)} />
               <label>Supplier</label>

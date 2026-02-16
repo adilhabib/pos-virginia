@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS ingredients (
   name TEXT NOT NULL UNIQUE,
   unit TEXT NOT NULL,
   stock_qty REAL NOT NULL DEFAULT 0,
+  unit_cost_cents INTEGER NOT NULL DEFAULT 0,
   low_stock_threshold REAL NOT NULL DEFAULT 0,
   supplier TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -103,6 +104,7 @@ CREATE TABLE IF NOT EXISTS cash_sessions (
   opened_by_user_id INTEGER NOT NULL,
   closed_by_user_id INTEGER,
   opening_cents INTEGER NOT NULL DEFAULT 0,
+  denomination_json TEXT,
   expected_closing_cents INTEGER,
   closing_cents INTEGER,
   variance_cents INTEGER,

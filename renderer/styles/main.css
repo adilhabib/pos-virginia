@@ -408,6 +408,17 @@ select {
   gap: 8px;
 }
 
+.summary-discount-controls {
+  margin-top: 10px;
+  margin-bottom: 8px;
+}
+
+.summary-discount-controls > span {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
 .summary-meta b {
   color: #c28f5b;
 }
