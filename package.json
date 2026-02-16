@@ -7,6 +7,7 @@
     "start": "node scripts/start-electron.js",
     "lint": "echo \"No linter configured\"",
     "db:reset": "node -e \"const fs=require('fs'); if(fs.existsSync('database/pos.db')) fs.unlinkSync('database/pos.db'); console.log('database reset');\"",
+    "supabase:backfill": "node scripts/run-with-electron-node.js scripts/backfill-supabase.js",
     "rebuild-native": "node scripts/rebuild-native.js",
     "postinstall": "node scripts/rebuild-native.js"
   },
@@ -21,7 +22,9 @@
   "dependencies": {
     "@babel/standalone": "^7.27.7",
     "@react-icons/all-files": "^4.1.0",
+    "@supabase/supabase-js": "^2.95.3",
     "better-sqlite3": "^11.8.1",
+    "dotenv": "^17.3.1",
     "electron": "^36.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

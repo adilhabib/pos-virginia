@@ -64,6 +64,35 @@ npm install
 npm start
 ```
 
+3. Optional Supabase mirror sync:
+
+```bash
+cp .env.example .env
+```
+
+Set:
+- `SUPABASE_PROJECT_ID`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+
+The app stays SQLite-first and syncs writes to Supabase in the background when configured.
+For best compatibility, create Supabase tables matching `database/schema.sql` names and columns (at minimum: `orders`, `order_items`, `payments`, `cash_sessions`, `cash_transactions`, `menu_items`, `ingredients`, `inventory_movements`, `audit_logs`).
+
+4. In Supabase SQL Editor, run:
+
+- `database/supabase_schema.sql`
+
+This creates required tables, grants, and RLS policies for `anon`/`authenticated`.
+After that, restart the app and call `window.posAPI.getSupabaseStatus()` from DevTools console to verify connection status.
+
+5. Optional one-time historical backfill (SQLite -> Supabase):
+
+```bash
+npm run supabase:backfill
+```
+
+This upserts all local rows table-by-table in FK-safe order.
+
 At first launch:
 - `database/pos.db` is initialized from `database/schema.sql`.
 - seed data from `database/seed_data.sql` is inserted if no users exist.

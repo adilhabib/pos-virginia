@@ -2,7 +2,9 @@ const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+require("dotenv").config();
 const Database = require("better-sqlite3");
+const { createClient } = require("@supabase/supabase-js");
 
 const DB_PATH = path.join(__dirname, "database", "pos.db");
 const SCHEMA_PATH = path.join(__dirname, "database", "schema.sql");
@@ -11,6 +13,103 @@ const BACKUP_DIR = path.join(__dirname, "backup", "daily_backups");
 const RECEIPTS_DIR = path.join(__dirname, "backup", "receipts");
 
 let db;
+let supabase = null;
+const supabaseState = {
+  enabled: false,
+  url: null,
+  lastCheckAt: null,
+  lastSyncAt: null,
+  lastSyncError: null
+};
+
+const SYNC_TABLE_SELECT_BY_ID = {
+  audit_logs: "SELECT * FROM audit_logs WHERE id = ?",
+  cash_sessions: "SELECT * FROM cash_sessions WHERE id = ?",
+  cash_transactions: "SELECT * FROM cash_transactions WHERE id = ?",
+  ingredients: "SELECT * FROM ingredients WHERE id = ?",
+  inventory_movements: "SELECT * FROM inventory_movements WHERE id = ?",
+  menu_items: "SELECT * FROM menu_items WHERE id = ?",
+  order_items: "SELECT * FROM order_items WHERE id = ?",
+  orders: "SELECT * FROM orders WHERE id = ?",
+  payments: "SELECT * FROM payments WHERE id = ?",
+  recipes: "SELECT * FROM recipes WHERE id = ?"
+};
+
+function initSupabase() {
+  const configuredUrl = String(process.env.SUPABASE_URL || "").trim();
+  const projectId = String(process.env.SUPABASE_PROJECT_ID || "").trim();
+  const supabaseUrl = configuredUrl || (projectId ? `https://${projectId}.supabase.co` : "");
+  const supabaseAnonKey = String(process.env.SUPABASE_ANON_KEY || "").trim();
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    supabaseState.enabled = false;
+    supabaseState.url = supabaseUrl || null;
+    supabaseState.lastCheckAt = new Date().toISOString();
+    return;
+  }
+
+  try {
+    supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        detectSessionInUrl: false
+      }
+    });
+    supabaseState.enabled = true;
+    supabaseState.url = supabaseUrl;
+    supabaseState.lastCheckAt = new Date().toISOString();
+    supabaseState.lastSyncError = null;
+  } catch (error) {
+    supabase = null;
+    supabaseState.enabled = false;
+    supabaseState.lastCheckAt = new Date().toISOString();
+    supabaseState.lastSyncError = String(error?.message || error || "Supabase init failed");
+    console.error("[supabase] init failed:", error);
+  }
+}
+
+function markSupabaseSyncError(error) {
+  supabaseState.lastSyncError = String(error?.message || error || "Unknown sync error");
+  supabaseState.lastCheckAt = new Date().toISOString();
+}
+
+async function syncUpsert(table, row) {
+  if (!supabaseState.enabled || !supabase || !row) return;
+  try {
+    const { error } = await supabase.from(table).upsert(row, { onConflict: "id" });
+    if (error) throw error;
+    supabaseState.lastSyncAt = new Date().toISOString();
+    supabaseState.lastSyncError = null;
+    supabaseState.lastCheckAt = new Date().toISOString();
+  } catch (error) {
+    markSupabaseSyncError(error);
+    console.error(`[supabase] upsert failed for ${table}:`, error);
+  }
+}
+
+async function syncDeleteById(table, id) {
+  if (!supabaseState.enabled || !supabase || id == null) return;
+  try {
+    const { error } = await supabase.from(table).delete().eq("id", id);
+    if (error) throw error;
+    supabaseState.lastSyncAt = new Date().toISOString();
+    supabaseState.lastSyncError = null;
+    supabaseState.lastCheckAt = new Date().toISOString();
+  } catch (error) {
+    markSupabaseSyncError(error);
+    console.error(`[supabase] delete failed for ${table}:`, error);
+  }
+}
+
+function syncTableRowById(table, id) {
+  if (!supabaseState.enabled || id == null) return;
+  const query = SYNC_TABLE_SELECT_BY_ID[table];
+  if (!query) return;
+  const row = db.prepare(query).get(id);
+  if (!row) return;
+  void syncUpsert(table, row);
+}
 
 function ensureDirectories() {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -82,10 +181,14 @@ function ensureSchemaMigrations() {
 }
 
 function writeAudit(userId, action, payload = null) {
-  db.prepare(
+  const result = db
+    .prepare(
     `INSERT INTO audit_logs (user_id, action, payload_json, created_at)
      VALUES (?, ?, ?, datetime('now'))`
-  ).run(userId || null, action, payload ? JSON.stringify(payload) : null);
+    )
+    .run(userId || null, action, payload ? JSON.stringify(payload) : null);
+  syncTableRowById("audit_logs", result.lastInsertRowid);
+  return result.lastInsertRowid;
 }
 
 function currentCashSessionId() {
@@ -367,6 +470,7 @@ function registerIpc() {
          VALUES (?, ?, ?, ?)`
       )
       .run(String(name).trim(), String(category).trim(), Math.round(price), active ? 1 : 0);
+    syncTableRowById("menu_items", result.lastInsertRowid);
 
     writeAudit(userId, "MENU_ITEM_CREATED", { menuItemId: result.lastInsertRowid, name, category, priceCents: price });
     return { ok: true, id: result.lastInsertRowid };
@@ -403,6 +507,7 @@ function registerIpc() {
 
     values.push(menuItemId);
     db.prepare(`UPDATE menu_items SET ${updates.join(", ")} WHERE id = ?`).run(...values);
+    syncTableRowById("menu_items", menuItemId);
     writeAudit(userId, "MENU_ITEM_UPDATED", { menuItemId, name, category, priceCents, active });
     return { ok: true };
   });
@@ -416,6 +521,7 @@ function registerIpc() {
        VALUES ('DRAFT', 0, 0, 0, ?, ?, datetime('now'), datetime('now'))`
     );
     const result = stmt.run(cashierUserId, notes || null);
+    syncTableRowById("orders", result.lastInsertRowid);
     writeAudit(cashierUserId, "ORDER_CREATED", { orderId: result.lastInsertRowid });
     return { ok: true, orderId: result.lastInsertRowid };
   });
@@ -464,16 +570,19 @@ function registerIpc() {
          SET quantity = ?, line_total_cents = ? * ?
          WHERE id = ?`
       ).run(newQty, menuItem.price_cents, newQty, existing.id);
+      syncTableRowById("order_items", existing.id);
     } else {
       const lineTotal = menuItem.price_cents * qty;
-      db.prepare(
+      const inserted = db.prepare(
         `INSERT INTO order_items
          (order_id, menu_item_id, quantity, unit_price_cents, line_total_cents, modifiers_json)
          VALUES (?, ?, ?, ?, ?, ?)`
       ).run(orderId, menuItemId, qty, menuItem.price_cents, lineTotal, modifiers ? JSON.stringify(modifiers) : null);
+      syncTableRowById("order_items", inserted.lastInsertRowid);
     }
 
     recalcOrderTotals(orderId);
+    syncTableRowById("orders", orderId);
 
     return { ok: true };
   });
@@ -493,15 +602,18 @@ function registerIpc() {
     const qty = Number(quantity);
     if (qty <= 0) {
       db.prepare("DELETE FROM order_items WHERE id = ?").run(orderItemId);
+      void syncDeleteById("order_items", orderItemId);
     } else {
       db.prepare(
         `UPDATE order_items
          SET quantity = ?, line_total_cents = ? * ?
          WHERE id = ?`
       ).run(qty, item.unit_price_cents, qty, orderItemId);
+      syncTableRowById("order_items", orderItemId);
     }
 
     recalcOrderTotals(orderId);
+    syncTableRowById("orders", orderId);
     return { ok: true };
   });
 
@@ -522,6 +634,7 @@ function registerIpc() {
        SET discount_cents = ?, tax_cents = 0, total_cents = ?, updated_at = datetime('now')
        WHERE id = ?`
     ).run(discount, total, orderId);
+    syncTableRowById("orders", orderId);
 
     writeAudit(userId || null, "ORDER_DISCOUNT_UPDATED", { orderId, discountCents: discount });
     return { ok: true, discountCents: discount, totalCents: total };
@@ -543,6 +656,7 @@ function registerIpc() {
       customerPhone ? String(customerPhone).trim() : null,
       orderId
     );
+    syncTableRowById("orders", orderId);
     writeAudit(userId || null, "ORDER_CUSTOMER_UPDATED", { orderId, customerName, customerPhone });
     return { ok: true };
   });
@@ -581,11 +695,13 @@ function registerIpc() {
               recipe.ingredient_id
             );
 
-            db.prepare(
+            const movementResult = db.prepare(
               `INSERT INTO inventory_movements
                (ingredient_id, movement_type, quantity, reason, reference_type, reference_id, user_id, created_at)
                VALUES (?, 'OUT', ?, 'Order Finalized', 'ORDER', ?, ?, datetime('now'))`
             ).run(recipe.ingredient_id, qtyToDeduct, orderId, userId || null);
+            syncTableRowById("ingredients", recipe.ingredient_id);
+            syncTableRowById("inventory_movements", movementResult.lastInsertRowid);
           }
         }
       });
@@ -593,6 +709,7 @@ function registerIpc() {
     }
 
     db.prepare("UPDATE orders SET status=?, updated_at=datetime('now') WHERE id=?").run(status, orderId);
+    syncTableRowById("orders", orderId);
     writeAudit(userId, "ORDER_STATUS_UPDATED", { orderId, status });
     return { ok: true };
   });
@@ -613,7 +730,7 @@ function registerIpc() {
     }
 
     const tx = db.transaction(() => {
-      db.prepare(
+      const paymentResult = db.prepare(
         `INSERT INTO payments
          (order_id, method, amount_cents, received_cents, change_cents, created_at)
          VALUES (?, 'CASH', ?, ?, ?, datetime('now'))`
@@ -621,13 +738,17 @@ function registerIpc() {
 
       db.prepare("UPDATE orders SET status='PAID', paid_at=datetime('now'), updated_at=datetime('now') WHERE id=?").run(orderId);
 
-      db.prepare(
+      const cashTxnResult = db.prepare(
         `INSERT INTO cash_transactions
          (session_id, transaction_type, amount_cents, reason, reference_type, reference_id, user_id, created_at)
          VALUES (?, 'IN', ?, 'Order Payment', 'ORDER', ?, ?, datetime('now'))`
       ).run(cashSessionId, total, orderId, userId || null);
+      return { paymentId: paymentResult.lastInsertRowid, cashTxnId: cashTxnResult.lastInsertRowid };
     });
-    tx();
+    const paymentInsert = tx();
+    syncTableRowById("payments", paymentInsert.paymentId);
+    syncTableRowById("orders", orderId);
+    syncTableRowById("cash_transactions", paymentInsert.cashTxnId);
 
     const receiptPath = await generateReceiptPdf(orderId);
     writeAudit(userId, "ORDER_PAID_CASH", { orderId, total, received, change, receiptPath });
@@ -654,13 +775,16 @@ function registerIpc() {
 
     const tx = db.transaction(() => {
       db.prepare("UPDATE ingredients SET stock_qty = stock_qty + ?, updated_at = datetime('now') WHERE id = ?").run(qty, ingredientId);
-      db.prepare(
+      const movementResult = db.prepare(
         `INSERT INTO inventory_movements
          (ingredient_id, movement_type, quantity, reason, reference_type, user_id, created_at)
          VALUES (?, ?, ?, ?, 'MANUAL', ?, datetime('now'))`
       ).run(ingredientId, movementType, amount, reason || "Manual adjustment", userId || null);
+      return movementResult.lastInsertRowid;
     });
-    tx();
+    const movementId = tx();
+    syncTableRowById("ingredients", ingredientId);
+    syncTableRowById("inventory_movements", movementId);
 
     writeAudit(userId, "INVENTORY_ADJUSTED", { ingredientId, qty, reason });
     return { ok: true };
@@ -673,13 +797,16 @@ function registerIpc() {
 
     const tx = db.transaction(() => {
       db.prepare("UPDATE ingredients SET stock_qty = stock_qty + ?, updated_at = datetime('now') WHERE id = ?").run(amount, ingredientId);
-      db.prepare(
+      const movementResult = db.prepare(
         `INSERT INTO inventory_movements
          (ingredient_id, movement_type, quantity, reason, reference_type, reference_id, user_id, created_at)
          VALUES (?, 'IN', ?, 'Purchase Entry', 'PURCHASE', ?, ?, datetime('now'))`
       ).run(ingredientId, amount, supplierRef || null, userId || null);
+      return movementResult.lastInsertRowid;
     });
-    tx();
+    const movementId = tx();
+    syncTableRowById("ingredients", ingredientId);
+    syncTableRowById("inventory_movements", movementId);
 
     writeAudit(userId, "INVENTORY_PURCHASE", { ingredientId, qty: amount, supplierRef });
     return { ok: true };
@@ -703,6 +830,7 @@ function registerIpc() {
         Number(lowStockThreshold || 0),
         supplier ? String(supplier).trim() : null
       );
+    syncTableRowById("ingredients", result.lastInsertRowid);
     writeAudit(userId, "INGREDIENT_CREATED", {
       ingredientId: result.lastInsertRowid,
       name,
@@ -733,6 +861,7 @@ function registerIpc() {
       supplier ? String(supplier).trim() : null,
       ingredientId
     );
+    syncTableRowById("ingredients", ingredientId);
     writeAudit(userId, "INGREDIENT_UPDATED", { ingredientId, name, unit, unitCostCents, lowStockThreshold, supplier });
     return { ok: true };
   });
@@ -745,6 +874,7 @@ function registerIpc() {
        (opened_by_user_id, opening_cents, opened_at, status)
        VALUES (?, ?, datetime('now'), 'OPEN')`
     ).run(userId, Number(openingCents || 0));
+    syncTableRowById("cash_sessions", result.lastInsertRowid);
     writeAudit(userId, "CASH_SESSION_OPENED", { sessionId: result.lastInsertRowid, openingCents });
     return { ok: true, sessionId: result.lastInsertRowid };
   });
@@ -775,11 +905,12 @@ function registerIpc() {
     const amount = Number(amountCents || 0);
     if (amount <= 0) return { ok: false, error: "Amount must be positive." };
 
-    db.prepare(
+    const result = db.prepare(
       `INSERT INTO cash_transactions
        (session_id, transaction_type, amount_cents, reason, reference_type, user_id, created_at)
        VALUES (?, ?, ?, ?, 'MANUAL', ?, datetime('now'))`
     ).run(sessionId, type, amount, reason || "Manual cash movement", userId || null);
+    syncTableRowById("cash_transactions", result.lastInsertRowid);
 
     writeAudit(userId, "CASH_TRANSACTION_ADDED", { sessionId, type, amount, reason });
     return { ok: true };
@@ -817,6 +948,7 @@ function registerIpc() {
            closed_at = datetime('now'), status='CLOSED'
        WHERE id = ?`
     ).run(userId, actual, expected, variance, denominationCounts ? JSON.stringify(denominationCounts) : null, sessionId);
+    syncTableRowById("cash_sessions", sessionId);
 
     writeAudit(userId, "CASH_SESSION_CLOSED", { sessionId, expected, actual, variance });
     return { ok: true, expected, actual, variance };
@@ -1137,9 +1269,27 @@ function registerIpc() {
     writeAudit(null, "CASH_DRAWER_OPENED", {});
     return { ok: true, message: "Cash drawer signal triggered (simulated)." };
   });
+
+  ipcMain.handle("system:supabase-status", async () => {
+    if (!supabaseState.enabled || !supabase) {
+      return { ok: true, supabase: { ...supabaseState, connected: false } };
+    }
+
+    try {
+      const { error } = await supabase.from("orders").select("id", { count: "exact", head: true });
+      if (error) throw error;
+      supabaseState.lastCheckAt = new Date().toISOString();
+      supabaseState.lastSyncError = null;
+      return { ok: true, supabase: { ...supabaseState, connected: true } };
+    } catch (error) {
+      markSupabaseSyncError(error);
+      return { ok: true, supabase: { ...supabaseState, connected: false } };
+    }
+  });
 }
 
 app.whenReady().then(() => {
+  initSupabase();
   initDb();
   makeBackupIfNeeded();
   registerIpc();
