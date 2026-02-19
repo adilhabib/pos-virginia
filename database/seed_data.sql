@@ -37,3 +37,8 @@ INSERT INTO recipes (menu_item_id, ingredient_id, qty_per_item) VALUES
  (5, 7, 180), (5, 8, 16),
  (6, 9, 90),
  (7, 10, 12);
+
+INSERT INTO promotions (code, name, promo_type, value_num, cap_cents, category, start_time, end_time, days_mask, active, auto_apply) VALUES
+(NULL, 'Happy Hour 10%', 'PERCENT_TOTAL', 10, NULL, NULL, '14:00', '17:00', NULL, 1, 1),
+('WELCOME5', 'Welcome PKR 5 Off', 'FIXED_TOTAL', 500, NULL, NULL, NULL, NULL, NULL, 1, 0),
+('BURGER15', '15% Off Burger Category', 'CATEGORY_PERCENT', 15, NULL, 'Burger', NULL, NULL, NULL, 1, 0);

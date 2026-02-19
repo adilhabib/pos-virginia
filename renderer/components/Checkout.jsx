@@ -3,7 +3,10 @@
   const { money } = window.POSUtils.db;
 
   function Checkout({ user, selectedOrder, onPaid }) {
+    const [method, setMethod] = useState("CASH");
+    const [amount, setAmount] = useState("");
     const [received, setReceived] = useState("");
+    const [payments, setPayments] = useState([]);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
     const [processing, setProcessing] = useState(false);
@@ -20,14 +23,28 @@
     const discountCents = order?.discount_cents || 0;
     const orderTotal = Math.max(0, order?.total_cents || 0);
     const payable = orderTotal;
+    const paidCents = useMemo(
+      () => (payments || []).reduce((acc, p) => acc + Number(p.amount_cents || 0), 0),
+      [payments]
+    );
+    const remainingCents = Math.max(0, payable - paidCents);
+    const amountCents = useMemo(() => Math.round(Number(amount || 0) * 100), [amount]);
+    const appliedAmountCents = Math.min(Math.max(0, amountCents), remainingCents);
     const receivedCents = useMemo(() => Math.round(Number(received || 0) * 100), [received]);
-    const changeCents = Math.max(0, receivedCents - payable);
+    const changeCents = method === "CASH" ? Math.max(0, receivedCents - appliedAmountCents) : 0;
 
     async function refreshOrder() {
       if (!order?.id) return;
       const refreshed = await window.POSUtils.orders.getOrder(order.id);
       setOrderData({ order: refreshed.order, items: refreshed.items });
       return refreshed;
+    }
+
+    async function refreshPayments() {
+      if (!order?.id) return;
+      const paymentResp = await window.POSUtils.orders.getOrderPayments(order.id);
+      setPayments(paymentResp.payments || []);
+      setAmount((paymentResp.remainingCents / 100).toFixed(2));
     }
 
     async function removeItem(item) {
@@ -58,25 +75,53 @@
       setMessage("");
       setProcessing(true);
       try {
-        if (receivedCents < orderTotal) throw new Error("Received cash is less than total.");
+        if (appliedAmountCents <= 0) throw new Error("Enter a valid payment amount.");
+        if (method === "CASH" && receivedCents < appliedAmountCents) {
+          throw new Error("Received cash is less than payment amount.");
+        }
 
         if (order.status !== "FINALIZED") {
           await window.POSUtils.orders.setOrderStatus(order.id, "FINALIZED", user.id);
         }
-        const payment = await window.POSUtils.orders.payOrderCash(order.id, receivedCents, user.id);
-        await window.posAPI.openCashDrawer();
+        const payment = await window.POSUtils.orders.addOrderPayment(
+          order.id,
+          method,
+          appliedAmountCents,
+          method === "CASH" ? receivedCents : null,
+          user.id
+        );
+        if (method === "CASH") {
+          await window.posAPI.openCashDrawer();
+        }
+
+        await refreshOrder();
+        await refreshPayments();
+        setReceived("");
+
         setMessage(
           payment.receiptPath
-            ? `Paid. Change: ${money(changeCents)}. Receipt saved: ${payment.receiptPath}`
-            : `Paid. Change: ${money(changeCents)}.`
+            ? `Order paid. Receipt saved: ${payment.receiptPath}`
+            : `Payment added. Remaining: ${money(payment.remainingCents)}.`
         );
-        onPaid();
+        if (payment.isPaid) {
+          onPaid();
+        }
       } catch (err) {
         setError(err.message || "Payment failed.");
       } finally {
         setProcessing(false);
       }
     }
+
+    useEffect(() => {
+      if (!order?.id) {
+        setPayments([]);
+        setAmount("");
+        setReceived("");
+        return;
+      }
+      refreshPayments().catch((err) => setError(err.message || "Unable to load payments."));
+    }, [order?.id]);
 
     return (
       <div className="payment-replica-layout">
@@ -118,23 +163,32 @@
               <div className="payable-head">
                 <h3>PAYABLE AMOUNT</h3>
                 <div className="amount">{money(payable)}</div>
-                <div className="guest">GUEST: <b>2</b></div>
+                <div className="guest">PAID: <b>{money(paidCents)}</b> | DUE: <b>{money(remainingCents)}</b></div>
               </div>
 
               <div className="pay-methods">
-                <button className="method active">CASH</button>
-                <button className="method" disabled>CARD</button>
-                <button className="method" disabled>VOUCHER</button>
+                <button className={method === "CASH" ? "method active" : "method"} onClick={() => setMethod("CASH")}>CASH</button>
+                <button className={method === "CARD" ? "method active" : "method"} onClick={() => setMethod("CARD")}>CARD</button>
+                <button className={method === "VOUCHER" ? "method active" : "method"} onClick={() => setMethod("VOUCHER")}>VOUCHER</button>
               </div>
 
               <div className="cash-box">
-                <span>ADD CASH RECEIVED</span>
-                <input value={received} onChange={(e) => setReceived(e.target.value)} />
+                <span>PAYMENT AMOUNT</span>
+                <input value={amount} onChange={(e) => setAmount(e.target.value)} />
               </div>
+              {method === "CASH" && (
+                <div className="cash-box">
+                  <span>CASH RECEIVED</span>
+                  <input value={received} onChange={(e) => setReceived(e.target.value)} />
+                </div>
+              )}
 
               <div className="pay-lines">
                 <div><span>SUBTOTAL</span><b>{money(subtotal)}</b></div>
                 <div><span>DISCOUNT</span><b>{money(discountCents)}</b></div>
+                <div><span>THIS PAYMENT</span><b>{money(appliedAmountCents)}</b></div>
+                <div><span>PAID SO FAR</span><b>{money(paidCents)}</b></div>
+                <div><span>REMAINING</span><b>{money(remainingCents)}</b></div>
               </div>
 
               <div className="pay-total">
@@ -144,8 +198,21 @@
                 <span>CHANGE</span><b>{money(changeCents)}</b>
               </div>
 
-              <button className="pay-now" disabled={processing || receivedCents < payable} onClick={payNow}>
-                {processing ? "PROCESSING..." : "PAY NOW"}
+              <div className="payment-history">
+                {(payments || []).map((p) => (
+                  <div key={p.id} className="payment-history-row">
+                    <span>#{p.id} {p.method}</span>
+                    <span>{money(p.amount_cents)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                className="pay-now"
+                disabled={processing || appliedAmountCents <= 0 || (method === "CASH" && receivedCents < appliedAmountCents)}
+                onClick={payNow}
+              >
+                {processing ? "PROCESSING..." : "ADD PAYMENT"}
               </button>
 
               {message && <div className="success">{message}</div>}
@@ -160,4 +227,3 @@
   window.POSComponents = window.POSComponents || {};
   window.POSComponents.Checkout = Checkout;
 })();
-

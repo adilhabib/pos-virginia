@@ -71,18 +71,22 @@ cp .env.example .env
 ```
 
 Set:
+- `POS_DATA_SOURCE` (`sqlite` or `supabase`)
 - `SUPABASE_PROJECT_ID`
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 
-The app stays SQLite-first and syncs writes to Supabase in the background when configured.
-For best compatibility, create Supabase tables matching `database/schema.sql` names and columns (at minimum: `orders`, `order_items`, `payments`, `cash_sessions`, `cash_transactions`, `menu_items`, `ingredients`, `inventory_movements`, `audit_logs`).
+Default mode is `supabase` in current scripts.
+`POS_DATA_SOURCE=supabase` runs Supabase-primary mode (local DB is in-memory cache hydrated from Supabase at startup).
+For best compatibility, create Supabase tables matching `database/schema.sql` names and columns (at minimum: `orders`, `order_items`, `payments`, `cash_sessions`, `cash_transactions`, `menu_items`, `ingredients`, `inventory_movements`, `audit_logs`, `promotions`, `kitchen_tickets`, `kitchen_ticket_items`).
 
 4. In Supabase SQL Editor, run:
 
 - `database/supabase_schema.sql`
+- `database/supabase_seed_data.sql`
 
-This creates required tables, grants, and RLS policies for `anon`/`authenticated`.
+This creates required tables, indexes, grants, RLS policies, and default seed data.
+In `POS_DATA_SOURCE=supabase` mode, startup reads data from Supabase into memory and all persistence is in Supabase.
 After that, restart the app and call `window.posAPI.getSupabaseStatus()` from DevTools console to verify connection status.
 
 5. Optional one-time historical backfill (SQLite -> Supabase):
@@ -93,10 +97,17 @@ npm run supabase:backfill
 
 This upserts all local rows table-by-table in FK-safe order.
 
+6. Reset remote POS data (Supabase):
+
+```bash
+npm run supabase:clear
+```
+
+Then restart app to reseed baseline data if needed.
+
 At first launch:
-- `database/pos.db` is initialized from `database/schema.sql`.
-- seed data from `database/seed_data.sql` is inserted if no users exist.
-- a daily backup copy is created in `backup/daily_backups/`.
+- runtime schema is initialized.
+- in Supabase mode, local cache hydrates from Supabase; if remote is empty, baseline seed is pushed.
 
 ## Default Login Users
 

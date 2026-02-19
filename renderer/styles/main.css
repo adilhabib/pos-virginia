@@ -419,6 +419,52 @@ select {
   margin-bottom: 6px;
 }
 
+.open-orders-panel {
+  margin-top: 10px;
+  border: 1px dashed #b8c0c7;
+  border-radius: 12px;
+  padding: 10px;
+  background: #f2f5f7;
+}
+
+.open-orders-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.open-orders-head button {
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 0.86rem;
+}
+
+.open-orders-list {
+  display: grid;
+  gap: 7px;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.open-order-chip {
+  display: grid;
+  grid-template-columns: 56px 60px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #d2d8dd;
+  background: #fff;
+  border-radius: 10px;
+  font-size: 0.86rem;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.open-order-chip.active {
+  border-color: #7ea6b2;
+  background: #e8f1f4;
+}
+
 .summary-meta b {
   color: #c28f5b;
 }
@@ -499,12 +545,17 @@ select {
   margin-top: 14px;
 }
 
+.summary-actions > button {
+  height: 50px;
+  font-weight: 700;
+}
+
 .danger-lite {
   border: 0;
   background: var(--danger);
   color: #111;
   font-weight: 700;
-  height: 56px;
+  height: 50px;
 }
 
 .send-lite {
@@ -512,7 +563,7 @@ select {
   background: var(--teal);
   color: #12353c;
   font-weight: 700;
-  height: 56px;
+  height: 50px;
 }
 
 /* Payment replica */
@@ -690,6 +741,30 @@ select {
   margin-top: 8px;
 }
 
+.payment-history {
+  margin-top: 12px;
+  max-height: 140px;
+  overflow: auto;
+  border: 1px dashed #c2c8cd;
+  border-radius: 10px;
+  padding: 8px;
+  background: #f2f5f7;
+}
+
+.payment-history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid #dce3e8;
+  font-size: 1rem;
+}
+
+.payment-history-row:last-child {
+  border-bottom: 0;
+}
+
 .pay-now {
   margin-top: 20px;
   width: 100%;
@@ -700,6 +775,142 @@ select {
   font-size: 2.4rem;
   letter-spacing: 0.25em;
   font-weight: 700;
+}
+
+/* KDS */
+.kds-screen {
+  padding: 16px;
+  background: #f7f8f9;
+  min-height: 100%;
+}
+
+.kds-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.kds-header h2 {
+  margin: 0;
+}
+
+.kds-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.kds-lanes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.kds-lane {
+  background: #eef2f4;
+  border: 1px solid #d9e0e5;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.kds-lane-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.kds-lane-head h3 {
+  margin: 0;
+}
+
+.kds-cards {
+  display: grid;
+  gap: 10px;
+  max-height: calc(100vh - 240px);
+  overflow: auto;
+}
+
+.kds-card {
+  border: 1px solid #d4dbe0;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+}
+
+.kds-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.kds-card-meta {
+  margin: 6px 0 8px;
+  display: flex;
+  justify-content: space-between;
+  color: #5f6d75;
+  font-size: 0.86rem;
+}
+
+.kds-time {
+  margin-top: 6px;
+  display: inline-block;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.kds-time.ok {
+  background: #e2f1e7;
+  color: #245a35;
+}
+
+.kds-time.warn {
+  background: #fef1dc;
+  color: #855400;
+}
+
+.kds-time.danger {
+  background: #fde3e5;
+  color: #8c2630;
+}
+
+.kds-items {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.kds-item-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.kds-item-row em {
+  color: #6b7780;
+  font-style: normal;
+}
+
+.kds-card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.kds-history {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.kds-history-row {
+  padding: 7px 0;
+  border-bottom: 1px solid #e3e8eb;
 }
 
 @media (max-width: 1280px) {
@@ -715,6 +926,10 @@ select {
 
   .menu-replica-layout,
   .payment-replica-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .kds-lanes {
     grid-template-columns: 1fr;
   }
 

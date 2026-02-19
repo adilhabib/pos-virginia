@@ -5,14 +5,22 @@ contextBridge.exposeInMainWorld("posAPI", {
   listMenu: (payload) => ipcRenderer.invoke("menu:list", payload),
   createMenuItem: (payload) => ipcRenderer.invoke("menu:create", payload),
   updateMenuItem: (payload) => ipcRenderer.invoke("menu:update", payload),
+  listPromotions: () => ipcRenderer.invoke("promotions:list"),
+  createPromotion: (payload) => ipcRenderer.invoke("promotions:create", payload),
+  updatePromotion: (payload) => ipcRenderer.invoke("promotions:update", payload),
 
   createOrder: (payload) => ipcRenderer.invoke("orders:create", payload),
+  listOpenOrders: (payload) => ipcRenderer.invoke("orders:list-open", payload),
   getOrder: (payload) => ipcRenderer.invoke("orders:get", payload),
+  getOrderPayments: (payload) => ipcRenderer.invoke("orders:get-payments", payload),
   addOrderItem: (payload) => ipcRenderer.invoke("orders:add-item", payload),
   updateOrderItemQty: (payload) => ipcRenderer.invoke("orders:update-item-qty", payload),
   updateOrderCustomer: (payload) => ipcRenderer.invoke("orders:update-customer", payload),
   updateOrderDiscount: (payload) => ipcRenderer.invoke("orders:update-discount", payload),
+  applyOrderPromo: (payload) => ipcRenderer.invoke("orders:apply-promo", payload),
+  clearOrderPromo: (payload) => ipcRenderer.invoke("orders:clear-promo", payload),
   updateOrderStatus: (payload) => ipcRenderer.invoke("orders:update-status", payload),
+  addOrderPayment: (payload) => ipcRenderer.invoke("orders:add-payment", payload),
   payOrderCash: (payload) => ipcRenderer.invoke("orders:pay-cash", payload),
 
   listInventory: () => ipcRenderer.invoke("inventory:list"),
@@ -25,6 +33,10 @@ contextBridge.exposeInMainWorld("posAPI", {
   getOpenCashSession: () => ipcRenderer.invoke("cash:get-open-session"),
   addCashTransaction: (payload) => ipcRenderer.invoke("cash:add-transaction", payload),
   closeCashSession: (payload) => ipcRenderer.invoke("cash:close-session", payload),
+
+  listKitchenTickets: (payload) => ipcRenderer.invoke("kds:list", payload),
+  updateKitchenTicketStatus: (payload) => ipcRenderer.invoke("kds:update-status", payload),
+  bumpKitchenTicket: (payload) => ipcRenderer.invoke("kds:bump", payload),
 
   getReportSummary: (payload) => ipcRenderer.invoke("reports:summary", payload),
   getDailyRegister: () => ipcRenderer.invoke("reports:daily-register"),

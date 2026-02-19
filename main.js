@@ -6,7 +6,8 @@ require("dotenv").config();
 const Database = require("better-sqlite3");
 const { createClient } = require("@supabase/supabase-js");
 
-const DB_PATH = path.join(__dirname, "database", "pos.db");
+const SUPABASE_ONLY = String(process.env.POS_DATA_SOURCE || "").trim().toLowerCase() === "supabase";
+const DB_PATH = SUPABASE_ONLY ? ":memory:" : path.join(__dirname, "database", "pos.db");
 const SCHEMA_PATH = path.join(__dirname, "database", "schema.sql");
 const SEED_PATH = path.join(__dirname, "database", "seed_data.sql");
 const BACKUP_DIR = path.join(__dirname, "backup", "daily_backups");
@@ -22,16 +23,37 @@ const supabaseState = {
   lastSyncError: null
 };
 
+const SQLITE_TABLE_SYNC_ORDER = [
+  "roles",
+  "users",
+  "menu_items",
+  "promotions",
+  "ingredients",
+  "recipes",
+  "orders",
+  "order_items",
+  "payments",
+  "kitchen_tickets",
+  "kitchen_ticket_items",
+  "cash_sessions",
+  "cash_transactions",
+  "inventory_movements",
+  "audit_logs"
+];
+
 const SYNC_TABLE_SELECT_BY_ID = {
   audit_logs: "SELECT * FROM audit_logs WHERE id = ?",
   cash_sessions: "SELECT * FROM cash_sessions WHERE id = ?",
   cash_transactions: "SELECT * FROM cash_transactions WHERE id = ?",
   ingredients: "SELECT * FROM ingredients WHERE id = ?",
   inventory_movements: "SELECT * FROM inventory_movements WHERE id = ?",
+  kitchen_ticket_items: "SELECT * FROM kitchen_ticket_items WHERE id = ?",
+  kitchen_tickets: "SELECT * FROM kitchen_tickets WHERE id = ?",
   menu_items: "SELECT * FROM menu_items WHERE id = ?",
   order_items: "SELECT * FROM order_items WHERE id = ?",
   orders: "SELECT * FROM orders WHERE id = ?",
   payments: "SELECT * FROM payments WHERE id = ?",
+  promotions: "SELECT * FROM promotions WHERE id = ?",
   recipes: "SELECT * FROM recipes WHERE id = ?"
 };
 
@@ -112,7 +134,9 @@ function syncTableRowById(table, id) {
 }
 
 function ensureDirectories() {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+  if (!SUPABASE_ONLY) {
+    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+  }
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
 }
@@ -144,7 +168,63 @@ function runSqlScript(filePath) {
   db.exec(sql);
 }
 
-function initDb() {
+async function fetchSupabaseTableRows(table) {
+  if (!supabaseState.enabled || !supabase) return [];
+  const pageSize = 1000;
+  const rows = [];
+  let from = 0;
+  while (true) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase.from(table).select("*").range(from, to);
+    if (error) throw new Error(`[supabase:${table}] ${error.message}`);
+    const batch = data || [];
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+  return rows;
+}
+
+function replaceLocalTableRows(table, rows) {
+  db.prepare(`DELETE FROM ${table}`).run();
+  if (!rows.length) return;
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  const placeholders = columns.map(() => "?").join(", ");
+  const stmt = db.prepare(`INSERT INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`);
+  const insertTxn = db.transaction((list) => {
+    for (const row of list) {
+      const values = columns.map((col) => (row[col] === undefined ? null : row[col]));
+      stmt.run(...values);
+    }
+  });
+  insertTxn(rows);
+}
+
+async function hydrateSqliteFromSupabase() {
+  if (!SUPABASE_ONLY) return;
+  if (!supabaseState.enabled || !supabase) {
+    throw new Error("Supabase-only mode requires valid SUPABASE_URL/SUPABASE_ANON_KEY.");
+  }
+  for (const table of [...SQLITE_TABLE_SYNC_ORDER].reverse()) {
+    db.prepare(`DELETE FROM ${table}`).run();
+  }
+  for (const table of SQLITE_TABLE_SYNC_ORDER) {
+    const rows = await fetchSupabaseTableRows(table);
+    replaceLocalTableRows(table, rows);
+  }
+}
+
+async function backfillSupabaseFromSqlite() {
+  if (!supabaseState.enabled || !supabase) return;
+  for (const table of SQLITE_TABLE_SYNC_ORDER) {
+    const rows = db.prepare(`SELECT * FROM ${table} ORDER BY id`).all();
+    for (const row of rows) {
+      await syncUpsert(table, row);
+    }
+  }
+}
+
+async function initDb() {
   ensureDirectories();
   db = new Database(DB_PATH);
   db.pragma("journal_mode = WAL");
@@ -153,9 +233,16 @@ function initDb() {
   runSqlScript(SCHEMA_PATH);
   ensureSchemaMigrations();
 
+  if (SUPABASE_ONLY) {
+    await hydrateSqliteFromSupabase();
+  }
+
   const hasUsers = db.prepare("SELECT COUNT(*) AS count FROM users").get().count > 0;
   if (!hasUsers && fs.existsSync(SEED_PATH)) {
     runSqlScript(SEED_PATH);
+    if (SUPABASE_ONLY) {
+      await backfillSupabaseFromSqlite();
+    }
   }
 }
 
@@ -163,6 +250,19 @@ function ensureSchemaMigrations() {
   const orderCols = db.prepare("PRAGMA table_info(orders)").all().map((c) => c.name);
   if (!orderCols.includes("discount_cents")) {
     db.exec("ALTER TABLE orders ADD COLUMN discount_cents INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!orderCols.includes("manual_discount_cents")) {
+    db.exec("ALTER TABLE orders ADD COLUMN manual_discount_cents INTEGER NOT NULL DEFAULT 0");
+    db.exec("UPDATE orders SET manual_discount_cents = COALESCE(discount_cents, 0)");
+  }
+  if (!orderCols.includes("promo_discount_cents")) {
+    db.exec("ALTER TABLE orders ADD COLUMN promo_discount_cents INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!orderCols.includes("promo_code")) {
+    db.exec("ALTER TABLE orders ADD COLUMN promo_code TEXT");
+  }
+  if (!orderCols.includes("promo_id")) {
+    db.exec("ALTER TABLE orders ADD COLUMN promo_id INTEGER");
   }
   if (!orderCols.includes("customer_name")) {
     db.exec("ALTER TABLE orders ADD COLUMN customer_name TEXT");
@@ -178,6 +278,64 @@ function ensureSchemaMigrations() {
   if (!ingredientCols.includes("unit_cost_cents")) {
     db.exec("ALTER TABLE ingredients ADD COLUMN unit_cost_cents INTEGER NOT NULL DEFAULT 0");
   }
+
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS promotions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE,
+      name TEXT NOT NULL,
+      promo_type TEXT NOT NULL CHECK (promo_type IN ('PERCENT_TOTAL', 'FIXED_TOTAL', 'CATEGORY_PERCENT')),
+      value_num REAL NOT NULL,
+      cap_cents INTEGER,
+      category TEXT,
+      start_time TEXT,
+      end_time TEXT,
+      days_mask TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      auto_apply INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
+  );
+
+  const hasPromotions = db.prepare("SELECT COUNT(*) AS count FROM promotions").get().count > 0;
+  if (!hasPromotions) {
+    db.exec(
+      `INSERT INTO promotions
+       (code, name, promo_type, value_num, cap_cents, category, start_time, end_time, days_mask, active, auto_apply)
+       VALUES
+       (NULL, 'Happy Hour 10%', 'PERCENT_TOTAL', 10, NULL, NULL, '14:00', '17:00', NULL, 1, 1),
+       ('WELCOME5', 'Welcome PKR 5 Off', 'FIXED_TOTAL', 500, NULL, NULL, NULL, NULL, NULL, 1, 0),
+       ('BURGER15', '15% Off Burger Category', 'CATEGORY_PERCENT', 15, NULL, 'Burger', NULL, NULL, NULL, 1, 0)`
+    );
+  }
+
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS kitchen_tickets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL UNIQUE,
+      status TEXT NOT NULL CHECK (status IN ('QUEUED', 'PREPARING', 'READY', 'SERVED', 'CANCELLED')),
+      notes TEXT,
+      bumped_by_user_id INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      started_at TEXT,
+      ready_at TEXT,
+      served_at TEXT,
+      FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+      FOREIGN KEY (bumped_by_user_id) REFERENCES users(id)
+    )`
+  );
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS kitchen_ticket_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id INTEGER NOT NULL,
+      menu_item_id INTEGER,
+      menu_item_name TEXT NOT NULL,
+      category TEXT,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY (ticket_id) REFERENCES kitchen_tickets(id) ON DELETE CASCADE
+    )`
+  );
 }
 
 function writeAudit(userId, action, payload = null) {
@@ -199,6 +357,7 @@ function currentCashSessionId() {
 }
 
 function makeBackupIfNeeded() {
+  if (SUPABASE_ONLY) return;
   const date = new Date().toISOString().slice(0, 10);
   const backupPath = path.join(BACKUP_DIR, `pos-${date}.db`);
   if (!fs.existsSync(backupPath) && fs.existsSync(DB_PATH)) {
@@ -245,23 +404,190 @@ function verifyStockForOrder(orderId) {
   return shortages;
 }
 
+function parseDaysMask(mask) {
+  if (!mask) return null;
+  return String(mask)
+    .split(",")
+    .map((v) => Number(v.trim()))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+}
+
+function isPromotionActiveNow(promo, now = new Date()) {
+  if (!promo || !promo.active) return false;
+  const dayMask = parseDaysMask(promo.days_mask);
+  if (dayMask && dayMask.length && !dayMask.includes(now.getDay())) return false;
+
+  const toMinutes = (value) => {
+    const parts = String(value || "").split(":").map((p) => Number(p));
+    if (parts.length < 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) return null;
+    return parts[0] * 60 + parts[1];
+  };
+
+  const hasWindow = promo.start_time && promo.end_time;
+  if (!hasWindow) return true;
+
+  const startMins = toMinutes(promo.start_time);
+  const endMins = toMinutes(promo.end_time);
+  if (startMins == null || endMins == null) return true;
+
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  if (endMins >= startMins) return nowMins >= startMins && nowMins <= endMins;
+  return nowMins >= startMins || nowMins <= endMins;
+}
+
+function calculatePromotionDiscount(orderId, promo, subtotalCents) {
+  if (!promo || !isPromotionActiveNow(promo)) return 0;
+  const subtotal = Number(subtotalCents || 0);
+  if (subtotal <= 0) return 0;
+
+  let discount = 0;
+  if (promo.promo_type === "PERCENT_TOTAL") {
+    discount = Math.round((subtotal * Number(promo.value_num || 0)) / 100);
+  } else if (promo.promo_type === "FIXED_TOTAL") {
+    discount = Math.round(Number(promo.value_num || 0));
+  } else if (promo.promo_type === "CATEGORY_PERCENT") {
+    const categorySubtotal = db
+      .prepare(
+        `SELECT COALESCE(SUM(oi.line_total_cents), 0) AS subtotal
+         FROM order_items oi
+         JOIN menu_items mi ON mi.id = oi.menu_item_id
+         WHERE oi.order_id = ? AND mi.category = ?`
+      )
+      .get(orderId, promo.category || "").subtotal;
+    discount = Math.round((Number(categorySubtotal || 0) * Number(promo.value_num || 0)) / 100);
+  }
+
+  if (promo.cap_cents != null) {
+    discount = Math.min(discount, Math.round(Number(promo.cap_cents || 0)));
+  }
+  return Math.max(0, Math.min(discount, subtotal));
+}
+
+function findBestAutoPromotion(orderId, subtotalCents) {
+  const promos = db
+    .prepare(
+      `SELECT *
+       FROM promotions
+       WHERE active = 1 AND auto_apply = 1`
+    )
+    .all();
+  let best = null;
+  let bestDiscount = 0;
+  for (const promo of promos) {
+    const discount = calculatePromotionDiscount(orderId, promo, subtotalCents);
+    if (discount > bestDiscount) {
+      best = promo;
+      bestDiscount = discount;
+    }
+  }
+  return { promo: best, discountCents: bestDiscount };
+}
+
 function recalcOrderTotals(orderId) {
   const subtotal = db
     .prepare("SELECT COALESCE(SUM(line_total_cents),0) AS subtotal FROM order_items WHERE order_id = ?")
     .get(orderId).subtotal;
-  const order = db.prepare("SELECT discount_cents FROM orders WHERE id = ?").get(orderId);
-  const discount = Math.max(0, Math.min(Number(order?.discount_cents || 0), Number(subtotal || 0)));
-  const total = Number(subtotal || 0) - discount;
+  const order = db
+    .prepare("SELECT discount_cents, manual_discount_cents, promo_discount_cents, promo_code FROM orders WHERE id = ?")
+    .get(orderId);
+  if (!order) return;
+
+  const subtotalNum = Number(subtotal || 0);
+  const promoCode = order.promo_code ? String(order.promo_code).trim().toUpperCase() : null;
+  let appliedPromoId = null;
+  let appliedPromoCode = null;
+  let promoDiscount = 0;
+
+  if (promoCode) {
+    const promo = db
+      .prepare("SELECT * FROM promotions WHERE active = 1 AND UPPER(code) = ? LIMIT 1")
+      .get(promoCode);
+    if (promo) {
+      promoDiscount = calculatePromotionDiscount(orderId, promo, subtotalNum);
+      if (promoDiscount > 0) {
+        appliedPromoId = promo.id;
+        appliedPromoCode = String(promo.code || "").toUpperCase();
+      }
+    }
+  } else {
+    const bestAuto = findBestAutoPromotion(orderId, subtotalNum);
+    promoDiscount = bestAuto.discountCents;
+    if (bestAuto.promo && promoDiscount > 0) {
+      appliedPromoId = bestAuto.promo.id;
+      appliedPromoCode = bestAuto.promo.code ? String(bestAuto.promo.code).toUpperCase() : null;
+    }
+  }
+
+  const requestedManual = Math.max(0, Math.round(Number(order?.manual_discount_cents || 0)));
+  const maxManualAllowed = Math.max(0, subtotalNum - promoDiscount);
+  const manualDiscount = Math.min(requestedManual, maxManualAllowed);
+  const discount = Math.max(0, Math.min(subtotalNum, manualDiscount + promoDiscount));
+  const total = subtotalNum - discount;
 
   db.prepare(
     `UPDATE orders
      SET subtotal_cents = ?,
+         manual_discount_cents = ?,
+         promo_discount_cents = ?,
+         promo_code = ?,
+         promo_id = ?,
          discount_cents = ?,
          tax_cents = 0,
          total_cents = ?,
          updated_at = datetime('now')
      WHERE id = ?`
-  ).run(subtotal, discount, total, orderId);
+  ).run(
+    subtotalNum,
+    manualDiscount,
+    promoDiscount,
+    appliedPromoCode,
+    appliedPromoId,
+    discount,
+    total,
+    orderId
+  );
+}
+
+function ensureKitchenTicketForOrder(orderId) {
+  const existing = db
+    .prepare("SELECT id FROM kitchen_tickets WHERE order_id = ? LIMIT 1")
+    .get(orderId);
+  if (existing) return existing.id;
+
+  const ticketInsert = db
+    .prepare(
+      `INSERT INTO kitchen_tickets
+       (order_id, status, created_at, updated_at)
+       VALUES (?, 'QUEUED', datetime('now'), datetime('now'))`
+    )
+    .run(orderId);
+  const ticketId = ticketInsert.lastInsertRowid;
+
+  const items = db
+    .prepare(
+      `SELECT oi.menu_item_id, mi.name AS menu_item_name, mi.category, oi.quantity
+       FROM order_items oi
+       JOIN menu_items mi ON mi.id = oi.menu_item_id
+       WHERE oi.order_id = ?`
+    )
+    .all(orderId);
+
+  const addItems = db.transaction(() => {
+    for (const item of items) {
+      const res = db
+        .prepare(
+          `INSERT INTO kitchen_ticket_items
+           (ticket_id, menu_item_id, menu_item_name, category, quantity)
+           VALUES (?, ?, ?, ?, ?)`
+        )
+        .run(ticketId, item.menu_item_id || null, item.menu_item_name, item.category || null, Number(item.quantity || 1));
+      syncTableRowById("kitchen_ticket_items", res.lastInsertRowid);
+    }
+  });
+  addItems();
+
+  syncTableRowById("kitchen_tickets", ticketId);
+  return ticketId;
 }
 
 function escapeHtml(value) {
@@ -426,6 +752,127 @@ function createMainWindow() {
 }
 
 function registerIpc() {
+  async function processOrderPayment({ orderId, method, amountCents, receivedCents, userId }) {
+    const paymentMethod = String(method || "").toUpperCase();
+    if (!["CASH", "CARD", "VOUCHER"].includes(paymentMethod)) {
+      return { ok: false, error: "Invalid payment method." };
+    }
+
+    const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId);
+    if (!order) return { ok: false, error: "Order not found." };
+    if (order.status === "PAID") return { ok: false, error: "Order already paid." };
+    if (order.status !== "FINALIZED") return { ok: false, error: "Order must be FINALIZED before payment." };
+
+    const paidSoFar = db
+      .prepare("SELECT COALESCE(SUM(amount_cents), 0) AS total FROM payments WHERE order_id = ?")
+      .get(orderId).total;
+    const remainingBefore = Math.max(0, Number(order.total_cents || 0) - Number(paidSoFar || 0));
+    if (remainingBefore <= 0) return { ok: false, error: "No outstanding balance on this order." };
+
+    const requestedAmount = Math.round(Number(amountCents || 0));
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+      return { ok: false, error: "Payment amount must be greater than zero." };
+    }
+    if (requestedAmount > remainingBefore) {
+      return { ok: false, error: "Payment amount cannot exceed remaining balance." };
+    }
+
+    const received = receivedCents == null ? null : Math.round(Number(receivedCents || 0));
+    let change = 0;
+    if (paymentMethod === "CASH") {
+      if (!Number.isFinite(received) || received < requestedAmount) {
+        return { ok: false, error: "Received cash is less than payment amount." };
+      }
+      change = received - requestedAmount;
+    }
+
+    const tx = db.transaction(() => {
+      const paymentResult = db.prepare(
+        `INSERT INTO payments
+         (order_id, method, amount_cents, received_cents, change_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))`
+      ).run(orderId, paymentMethod, requestedAmount, paymentMethod === "CASH" ? received : null, paymentMethod === "CASH" ? change : 0);
+
+      let cashTxnId = null;
+      if (paymentMethod === "CASH") {
+        const cashSessionId = currentCashSessionId();
+        if (!cashSessionId) {
+          throw new Error("Open a cash shift before taking cash payment.");
+        }
+        const cashTxnResult = db.prepare(
+          `INSERT INTO cash_transactions
+           (session_id, transaction_type, amount_cents, reason, reference_type, reference_id, user_id, created_at)
+           VALUES (?, 'IN', ?, 'Order Payment', 'ORDER', ?, ?, datetime('now'))`
+        ).run(cashSessionId, requestedAmount, orderId, userId || null);
+        cashTxnId = cashTxnResult.lastInsertRowid;
+      }
+
+      const paidAfter = db
+        .prepare("SELECT COALESCE(SUM(amount_cents), 0) AS total FROM payments WHERE order_id = ?")
+        .get(orderId).total;
+      const remainingAfter = Math.max(0, Number(order.total_cents || 0) - Number(paidAfter || 0));
+      const isPaid = remainingAfter <= 0;
+
+      if (isPaid) {
+        db.prepare(
+          "UPDATE orders SET status='PAID', paid_at=datetime('now'), updated_at=datetime('now') WHERE id = ?"
+        ).run(orderId);
+      } else {
+        db.prepare("UPDATE orders SET updated_at=datetime('now') WHERE id = ?").run(orderId);
+      }
+
+      return {
+        paymentId: paymentResult.lastInsertRowid,
+        cashTxnId,
+        paidAfter,
+        remainingAfter,
+        isPaid
+      };
+    });
+
+    let result;
+    try {
+      result = tx();
+    } catch (error) {
+      return { ok: false, error: error?.message || "Payment failed." };
+    }
+
+    syncTableRowById("payments", result.paymentId);
+    syncTableRowById("orders", orderId);
+    if (result.cashTxnId) syncTableRowById("cash_transactions", result.cashTxnId);
+
+    let receiptPath = null;
+    if (result.isPaid) {
+      receiptPath = await generateReceiptPdf(orderId);
+    }
+
+    writeAudit(userId || null, "ORDER_PAYMENT_ADDED", {
+      orderId,
+      method: paymentMethod,
+      amount: requestedAmount,
+      received: paymentMethod === "CASH" ? received : null,
+      change: paymentMethod === "CASH" ? change : 0,
+      paidCents: result.paidAfter,
+      remainingCents: result.remainingAfter
+    });
+    if (result.isPaid) {
+      writeAudit(userId || null, "ORDER_PAID", { orderId, receiptPath });
+    }
+
+    return {
+      ok: true,
+      paymentId: result.paymentId,
+      method: paymentMethod,
+      amountCents: requestedAmount,
+      receivedCents: paymentMethod === "CASH" ? received : null,
+      changeCents: paymentMethod === "CASH" ? change : 0,
+      paidCents: result.paidAfter,
+      remainingCents: result.remainingAfter,
+      isPaid: result.isPaid,
+      receiptPath
+    };
+  }
+
   ipcMain.handle("auth:login", (_, payload) => {
     const { username, pin } = payload;
     const user = db
@@ -512,6 +959,77 @@ function registerIpc() {
     return { ok: true };
   });
 
+  ipcMain.handle("promotions:list", () => {
+    const rows = db
+      .prepare(
+        `SELECT id, code, name, promo_type, value_num, cap_cents, category, start_time, end_time, days_mask, active, auto_apply, created_at
+         FROM promotions
+         ORDER BY active DESC, id DESC`
+      )
+      .all();
+    return { ok: true, promotions: rows };
+  });
+
+  ipcMain.handle("promotions:create", (_, payload = {}) => {
+    const { userId, code, name, promoType, valueNum, capCents, category, startTime, endTime, daysMask, active, autoApply } = payload;
+    if (!isAdminOrManager(userId)) return { ok: false, error: "Only admin/manager can create promotions." };
+    if (!name || !promoType) return { ok: false, error: "Name and promo type are required." };
+    const allowed = ["PERCENT_TOTAL", "FIXED_TOTAL", "CATEGORY_PERCENT"];
+    if (!allowed.includes(String(promoType))) return { ok: false, error: "Invalid promo type." };
+
+    const result = db
+      .prepare(
+        `INSERT INTO promotions
+         (code, name, promo_type, value_num, cap_cents, category, start_time, end_time, days_mask, active, auto_apply, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+      )
+      .run(
+        code ? String(code).trim().toUpperCase() : null,
+        String(name).trim(),
+        String(promoType),
+        Number(valueNum || 0),
+        capCents == null || capCents === "" ? null : Math.max(0, Math.round(Number(capCents))),
+        category ? String(category).trim() : null,
+        startTime ? String(startTime).trim() : null,
+        endTime ? String(endTime).trim() : null,
+        daysMask ? String(daysMask).trim() : null,
+        active === false ? 0 : 1,
+        autoApply ? 1 : 0
+      );
+    syncTableRowById("promotions", result.lastInsertRowid);
+    writeAudit(userId, "PROMOTION_CREATED", { promotionId: result.lastInsertRowid, code, name, promoType, valueNum });
+    return { ok: true, id: result.lastInsertRowid };
+  });
+
+  ipcMain.handle("promotions:update", (_, payload = {}) => {
+    const { userId, promotionId, code, name, promoType, valueNum, capCents, category, startTime, endTime, daysMask, active, autoApply } = payload;
+    if (!isAdminOrManager(userId)) return { ok: false, error: "Only admin/manager can update promotions." };
+    const promo = db.prepare("SELECT id FROM promotions WHERE id = ?").get(promotionId);
+    if (!promo) return { ok: false, error: "Promotion not found." };
+
+    db.prepare(
+      `UPDATE promotions
+       SET code = ?, name = ?, promo_type = ?, value_num = ?, cap_cents = ?, category = ?, start_time = ?, end_time = ?, days_mask = ?, active = ?, auto_apply = ?
+       WHERE id = ?`
+    ).run(
+      code ? String(code).trim().toUpperCase() : null,
+      String(name).trim(),
+      String(promoType),
+      Number(valueNum || 0),
+      capCents == null || capCents === "" ? null : Math.max(0, Math.round(Number(capCents))),
+      category ? String(category).trim() : null,
+      startTime ? String(startTime).trim() : null,
+      endTime ? String(endTime).trim() : null,
+      daysMask ? String(daysMask).trim() : null,
+      active ? 1 : 0,
+      autoApply ? 1 : 0,
+      promotionId
+    );
+    syncTableRowById("promotions", promotionId);
+    writeAudit(userId, "PROMOTION_UPDATED", { promotionId, code, name, promoType, valueNum, active, autoApply });
+    return { ok: true };
+  });
+
   ipcMain.handle("orders:create", (_, { cashierUserId, notes }) => {
     const openSessionId = currentCashSessionId();
     if (!openSessionId) return { ok: false, error: "Open a cash shift before creating orders." };
@@ -524,6 +1042,29 @@ function registerIpc() {
     syncTableRowById("orders", result.lastInsertRowid);
     writeAudit(cashierUserId, "ORDER_CREATED", { orderId: result.lastInsertRowid });
     return { ok: true, orderId: result.lastInsertRowid };
+  });
+
+  ipcMain.handle("orders:list-open", (_, { cashierUserId } = {}) => {
+    const whereCashier = cashierUserId ? "AND o.cashier_user_id = ?" : "";
+    const rows = db
+      .prepare(
+        `SELECT o.id,
+                o.status,
+                o.customer_name,
+                o.customer_phone,
+                o.total_cents,
+                o.updated_at,
+                COALESCE(SUM(oi.quantity), 0) AS item_count
+         FROM orders o
+         LEFT JOIN order_items oi ON oi.order_id = o.id
+         WHERE o.status IN ('DRAFT', 'HOLD')
+           ${whereCashier}
+         GROUP BY o.id
+         ORDER BY o.updated_at DESC
+         LIMIT 25`
+      )
+      .all(...(cashierUserId ? [cashierUserId] : []));
+    return { ok: true, orders: rows };
   });
 
   ipcMain.handle("orders:get", (_, { orderId }) => {
@@ -539,6 +1080,24 @@ function registerIpc() {
       )
       .all(orderId);
     return { ok: true, order, items };
+  });
+
+  ipcMain.handle("orders:get-payments", (_, { orderId }) => {
+    const order = db.prepare("SELECT id, total_cents, status FROM orders WHERE id = ?").get(orderId);
+    if (!order) return { ok: false, error: "Order not found." };
+
+    const payments = db
+      .prepare(
+        `SELECT id, method, amount_cents, received_cents, change_cents, created_at
+         FROM payments
+         WHERE order_id = ?
+         ORDER BY id ASC`
+      )
+      .all(orderId);
+    const paidCents = payments.reduce((acc, p) => acc + Number(p.amount_cents || 0), 0);
+    const remainingCents = Math.max(0, Number(order.total_cents || 0) - paidCents);
+
+    return { ok: true, payments, paidCents, remainingCents, orderTotalCents: Number(order.total_cents || 0), status: order.status };
   });
 
   ipcMain.handle("orders:add-item", (_, { orderId, menuItemId, quantity, modifiers }) => {
@@ -626,18 +1185,71 @@ function registerIpc() {
 
     const requested = Math.round(Number(discountCents || 0));
     if (!Number.isFinite(requested) || requested < 0) return { ok: false, error: "Invalid discount amount." };
-    const discount = Math.min(requested, Number(order.subtotal_cents || 0));
-    const total = Number(order.subtotal_cents || 0) - discount;
 
     db.prepare(
       `UPDATE orders
-       SET discount_cents = ?, tax_cents = 0, total_cents = ?, updated_at = datetime('now')
+       SET manual_discount_cents = ?, updated_at = datetime('now')
        WHERE id = ?`
-    ).run(discount, total, orderId);
+    ).run(requested, orderId);
+    recalcOrderTotals(orderId);
     syncTableRowById("orders", orderId);
 
-    writeAudit(userId || null, "ORDER_DISCOUNT_UPDATED", { orderId, discountCents: discount });
-    return { ok: true, discountCents: discount, totalCents: total };
+    const updated = db
+      .prepare("SELECT manual_discount_cents, promo_discount_cents, discount_cents, total_cents FROM orders WHERE id = ?")
+      .get(orderId);
+    writeAudit(userId || null, "ORDER_DISCOUNT_UPDATED", {
+      orderId,
+      manualDiscountCents: updated.manual_discount_cents,
+      promoDiscountCents: updated.promo_discount_cents,
+      discountCents: updated.discount_cents
+    });
+    return {
+      ok: true,
+      manualDiscountCents: updated.manual_discount_cents,
+      promoDiscountCents: updated.promo_discount_cents,
+      discountCents: updated.discount_cents,
+      totalCents: updated.total_cents
+    };
+  });
+
+  ipcMain.handle("orders:apply-promo", (_, { orderId, promoCode, userId }) => {
+    const order = db.prepare("SELECT id, status FROM orders WHERE id = ?").get(orderId);
+    if (!order) return { ok: false, error: "Order not found." };
+    if (order.status === "PAID" || order.status === "CANCELLED") {
+      return { ok: false, error: "Promo can be applied only before payment/cancel." };
+    }
+    const normalized = String(promoCode || "").trim().toUpperCase();
+    if (!normalized) return { ok: false, error: "Promo code is required." };
+
+    const promo = db.prepare("SELECT * FROM promotions WHERE active = 1 AND UPPER(code) = ? LIMIT 1").get(normalized);
+    if (!promo) return { ok: false, error: "Invalid promo code." };
+    if (!isPromotionActiveNow(promo)) return { ok: false, error: "Promo is not active at this time." };
+
+    db.prepare("UPDATE orders SET promo_code = ?, promo_id = ?, updated_at = datetime('now') WHERE id = ?").run(
+      normalized,
+      promo.id,
+      orderId
+    );
+    recalcOrderTotals(orderId);
+    syncTableRowById("orders", orderId);
+    writeAudit(userId || null, "ORDER_PROMO_APPLIED", { orderId, promoCode: normalized, promoId: promo.id });
+    const updated = db
+      .prepare("SELECT promo_code, promo_discount_cents, discount_cents, total_cents FROM orders WHERE id = ?")
+      .get(orderId);
+    return { ok: true, promo: updated };
+  });
+
+  ipcMain.handle("orders:clear-promo", (_, { orderId, userId }) => {
+    const order = db.prepare("SELECT id, status FROM orders WHERE id = ?").get(orderId);
+    if (!order) return { ok: false, error: "Order not found." };
+    if (order.status === "PAID" || order.status === "CANCELLED") {
+      return { ok: false, error: "Promo can be cleared only before payment/cancel." };
+    }
+    db.prepare("UPDATE orders SET promo_code = NULL, promo_id = NULL, promo_discount_cents = 0, updated_at = datetime('now') WHERE id = ?").run(orderId);
+    recalcOrderTotals(orderId);
+    syncTableRowById("orders", orderId);
+    writeAudit(userId || null, "ORDER_PROMO_CLEARED", { orderId });
+    return { ok: true };
   });
 
   ipcMain.handle("orders:update-customer", (_, { orderId, customerName, customerPhone, userId }) => {
@@ -706,53 +1318,45 @@ function registerIpc() {
         }
       });
       deductTxn();
+      const ticketId = ensureKitchenTicketForOrder(orderId);
+      syncTableRowById("kitchen_tickets", ticketId);
     }
 
     db.prepare("UPDATE orders SET status=?, updated_at=datetime('now') WHERE id=?").run(status, orderId);
     syncTableRowById("orders", orderId);
+    if (status === "CANCELLED") {
+      const ticket = db.prepare("SELECT id FROM kitchen_tickets WHERE order_id = ? LIMIT 1").get(orderId);
+      if (ticket) {
+        db.prepare(
+          `UPDATE kitchen_tickets
+           SET status = 'CANCELLED', updated_at = datetime('now')
+           WHERE id = ?`
+        ).run(ticket.id);
+        syncTableRowById("kitchen_tickets", ticket.id);
+      }
+    }
     writeAudit(userId, "ORDER_STATUS_UPDATED", { orderId, status });
     return { ok: true };
   });
 
+  ipcMain.handle("orders:add-payment", async (_, { orderId, method, amountCents, receivedCents, userId }) => {
+    return processOrderPayment({ orderId, method, amountCents, receivedCents, userId });
+  });
+
   ipcMain.handle("orders:pay-cash", async (_, { orderId, receivedCents, userId }) => {
-    const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId);
+    const order = db.prepare("SELECT id, total_cents FROM orders WHERE id = ?").get(orderId);
     if (!order) return { ok: false, error: "Order not found." };
-    if (order.status !== "FINALIZED") return { ok: false, error: "Order must be FINALIZED before payment." };
-
-    const total = order.total_cents;
-    const received = Number(receivedCents || 0);
-    if (received < total) return { ok: false, error: "Insufficient cash received." };
-    const change = received - total;
-
-    const cashSessionId = currentCashSessionId();
-    if (!cashSessionId) {
-      return { ok: false, error: "Open a cash shift before taking payment." };
-    }
-
-    const tx = db.transaction(() => {
-      const paymentResult = db.prepare(
-        `INSERT INTO payments
-         (order_id, method, amount_cents, received_cents, change_cents, created_at)
-         VALUES (?, 'CASH', ?, ?, ?, datetime('now'))`
-      ).run(orderId, total, received, change);
-
-      db.prepare("UPDATE orders SET status='PAID', paid_at=datetime('now'), updated_at=datetime('now') WHERE id=?").run(orderId);
-
-      const cashTxnResult = db.prepare(
-        `INSERT INTO cash_transactions
-         (session_id, transaction_type, amount_cents, reason, reference_type, reference_id, user_id, created_at)
-         VALUES (?, 'IN', ?, 'Order Payment', 'ORDER', ?, ?, datetime('now'))`
-      ).run(cashSessionId, total, orderId, userId || null);
-      return { paymentId: paymentResult.lastInsertRowid, cashTxnId: cashTxnResult.lastInsertRowid };
+    const paidSoFar = db
+      .prepare("SELECT COALESCE(SUM(amount_cents), 0) AS total FROM payments WHERE order_id = ?")
+      .get(orderId).total;
+    const remaining = Math.max(0, Number(order.total_cents || 0) - Number(paidSoFar || 0));
+    return processOrderPayment({
+      orderId,
+      method: "CASH",
+      amountCents: remaining,
+      receivedCents,
+      userId
     });
-    const paymentInsert = tx();
-    syncTableRowById("payments", paymentInsert.paymentId);
-    syncTableRowById("orders", orderId);
-    syncTableRowById("cash_transactions", paymentInsert.cashTxnId);
-
-    const receiptPath = await generateReceiptPdf(orderId);
-    writeAudit(userId, "ORDER_PAID_CASH", { orderId, total, received, change, receiptPath });
-    return { ok: true, totalCents: total, receivedCents: received, changeCents: change, receiptPath };
   });
 
   ipcMain.handle("inventory:list", () => {
@@ -952,6 +1556,100 @@ function registerIpc() {
 
     writeAudit(userId, "CASH_SESSION_CLOSED", { sessionId, expected, actual, variance });
     return { ok: true, expected, actual, variance };
+  });
+
+  ipcMain.handle("kds:list", (_, { statuses } = {}) => {
+    const allowed = ["QUEUED", "PREPARING", "READY", "SERVED", "CANCELLED"];
+    let normalized = Array.isArray(statuses)
+      ? statuses.map((s) => String(s).toUpperCase()).filter((s) => allowed.includes(s))
+      : ["QUEUED", "PREPARING", "READY"];
+    if (!normalized.length) normalized = ["QUEUED", "PREPARING", "READY"];
+
+    const placeholders = normalized.map(() => "?").join(", ");
+    const tickets = db
+      .prepare(
+        `SELECT kt.id,
+                kt.order_id,
+                kt.status,
+                kt.notes,
+                kt.created_at,
+                kt.updated_at,
+                kt.started_at,
+                kt.ready_at,
+                kt.served_at,
+                o.customer_name,
+                o.customer_phone
+         FROM kitchen_tickets kt
+         JOIN orders o ON o.id = kt.order_id
+         WHERE kt.status IN (${placeholders})
+         ORDER BY kt.id ASC`
+      )
+      .all(...normalized);
+
+    const withItems = tickets.map((t) => {
+      const items = db
+        .prepare(
+          `SELECT id, menu_item_name, category, quantity
+           FROM kitchen_ticket_items
+           WHERE ticket_id = ?
+           ORDER BY id ASC`
+        )
+        .all(t.id);
+      return { ...t, items };
+    });
+    return { ok: true, tickets: withItems };
+  });
+
+  ipcMain.handle("kds:update-status", (_, { ticketId, status, userId }) => {
+    const next = String(status || "").toUpperCase();
+    const allowed = ["QUEUED", "PREPARING", "READY", "SERVED", "CANCELLED"];
+    if (!allowed.includes(next)) return { ok: false, error: "Invalid ticket status." };
+
+    const ticket = db.prepare("SELECT * FROM kitchen_tickets WHERE id = ?").get(ticketId);
+    if (!ticket) return { ok: false, error: "Ticket not found." };
+
+    db.prepare(
+      `UPDATE kitchen_tickets
+       SET status = ?,
+           started_at = CASE WHEN ? = 'PREPARING' THEN COALESCE(started_at, datetime('now')) ELSE started_at END,
+           ready_at = CASE WHEN ? = 'READY' THEN datetime('now') ELSE ready_at END,
+           served_at = CASE WHEN ? = 'SERVED' THEN datetime('now') ELSE served_at END,
+           bumped_by_user_id = ?,
+           updated_at = datetime('now')
+       WHERE id = ?`
+    ).run(next, next, next, next, userId || null, ticketId);
+
+    syncTableRowById("kitchen_tickets", ticketId);
+    writeAudit(userId || null, "KDS_TICKET_STATUS_UPDATED", { ticketId, orderId: ticket.order_id, status: next });
+    return { ok: true };
+  });
+
+  ipcMain.handle("kds:bump", (_, { ticketId, userId }) => {
+    const ticket = db.prepare("SELECT id, order_id, status FROM kitchen_tickets WHERE id = ?").get(ticketId);
+    if (!ticket) return { ok: false, error: "Ticket not found." };
+    const flow = {
+      QUEUED: "PREPARING",
+      PREPARING: "READY",
+      READY: "SERVED",
+      SERVED: "SERVED",
+      CANCELLED: "CANCELLED"
+    };
+    const next = flow[ticket.status] || ticket.status;
+    if (next === ticket.status) return { ok: true, status: next };
+
+    db.prepare(
+      `UPDATE kitchen_tickets
+       SET status = ?,
+           started_at = CASE WHEN ? = 'PREPARING' THEN COALESCE(started_at, datetime('now')) ELSE started_at END,
+           ready_at = CASE WHEN ? = 'READY' THEN datetime('now') ELSE ready_at END,
+           served_at = CASE WHEN ? = 'SERVED' THEN datetime('now') ELSE served_at END,
+           bumped_by_user_id = ?,
+           updated_at = datetime('now')
+       WHERE id = ?`
+    ).run(next, next, next, next, userId || null, ticketId);
+    syncTableRowById("kitchen_tickets", ticketId);
+    writeAudit(userId || null, "KDS_TICKET_BUMPED", { ticketId, orderId: ticket.order_id, from: ticket.status, to: next });
+    return { ok: true, status: next };
   });
 
   ipcMain.handle("reports:summary", (_, { range }) => {
@@ -1272,7 +1970,7 @@ function registerIpc() {
 
   ipcMain.handle("system:supabase-status", async () => {
     if (!supabaseState.enabled || !supabase) {
-      return { ok: true, supabase: { ...supabaseState, connected: false } };
+      return { ok: true, supabase: { ...supabaseState, connected: false, dataSource: SUPABASE_ONLY ? "supabase" : "sqlite" } };
     }
 
     try {
@@ -1280,17 +1978,23 @@ function registerIpc() {
       if (error) throw error;
       supabaseState.lastCheckAt = new Date().toISOString();
       supabaseState.lastSyncError = null;
-      return { ok: true, supabase: { ...supabaseState, connected: true } };
+      return { ok: true, supabase: { ...supabaseState, connected: true, dataSource: SUPABASE_ONLY ? "supabase" : "sqlite" } };
     } catch (error) {
       markSupabaseSyncError(error);
-      return { ok: true, supabase: { ...supabaseState, connected: false } };
+      return { ok: true, supabase: { ...supabaseState, connected: false, dataSource: SUPABASE_ONLY ? "supabase" : "sqlite" } };
     }
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   initSupabase();
-  initDb();
+  try {
+    await initDb();
+  } catch (error) {
+    console.error("Database initialization failed:", error);
+    app.quit();
+    return;
+  }
   makeBackupIfNeeded();
   registerIpc();
   createMainWindow();

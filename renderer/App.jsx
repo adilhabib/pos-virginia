@@ -2,6 +2,7 @@ const { useMemo, useState } = React;
 
 const NAV_ITEMS = [
   { key: "home", target: "orders", label: "HOME", icon: "home", roles: ["ADMIN", "MANAGER", "CASHIER"] },
+  { key: "kitchen", target: "kds", label: "KITCHEN", icon: "kitchen", roles: ["ADMIN", "MANAGER", "CASHIER"] },
   { key: "payment", target: "checkout", label: "PAYMENT", icon: "payment", roles: ["ADMIN", "MANAGER", "CASHIER"] },
   { key: "inventory", target: "inventory", label: "INVENTORY", icon: "inventory", roles: ["ADMIN", "MANAGER"] },
   { key: "reports", target: "reports", label: "REPORTS", icon: "reports", roles: ["ADMIN", "MANAGER"] },
@@ -33,6 +34,16 @@ function NavIcon({ name }) {
       <svg {...common}>
         <rect x="2" y="5" width="20" height="14" rx="2" />
         <path d="M2 10h20" />
+      </svg>
+    );
+  }
+  if (name === "kitchen") {
+    return (
+      <svg {...common}>
+        <path d="M4 3v7a4 4 0 0 0 4 4h0V3" />
+        <path d="M8 3v11" />
+        <path d="M12 3v6" />
+        <path d="M16 9a3 3 0 1 0 0 6h0V3" />
       </svg>
     );
   }
@@ -159,6 +170,7 @@ function App() {
           {activeScreen === "checkout" && (
             <window.POSComponents.Checkout user={user} selectedOrder={selectedOrder} onPaid={handleOrderPaid} />
           )}
+          {activeScreen === "kds" && <window.POSComponents.KDS user={user} />}
           {activeScreen === "inventory" && <window.POSComponents.Inventory user={user} />}
           {activeScreen === "cash" && <window.POSComponents.CashSession user={user} />}
           {activeScreen === "reports" && <window.POSComponents.Reports />}

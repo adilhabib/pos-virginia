@@ -4,6 +4,9 @@ const electronBinary = require("electron");
 const env = { ...process.env };
 
 delete env.ELECTRON_RUN_AS_NODE;
+if (!env.POS_DATA_SOURCE) {
+  env.POS_DATA_SOURCE = "supabase";
+}
 
 const child = spawn(electronBinary, ["."], {
   stdio: "inherit",

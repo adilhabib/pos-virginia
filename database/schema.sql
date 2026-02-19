@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS orders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   status TEXT NOT NULL CHECK (status IN ('DRAFT', 'HOLD', 'CANCELLED', 'FINALIZED', 'PAID')),
   subtotal_cents INTEGER NOT NULL DEFAULT 0,
+  manual_discount_cents INTEGER NOT NULL DEFAULT 0,
+  promo_discount_cents INTEGER NOT NULL DEFAULT 0,
+  promo_code TEXT,
+  promo_id INTEGER,
   discount_cents INTEGER NOT NULL DEFAULT 0,
   tax_cents INTEGER NOT NULL DEFAULT 0,
   total_cents INTEGER NOT NULL DEFAULT 0,
@@ -60,6 +64,22 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at TEXT NOT NULL,
   paid_at TEXT,
   FOREIGN KEY (cashier_user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS promotions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT UNIQUE,
+  name TEXT NOT NULL,
+  promo_type TEXT NOT NULL CHECK (promo_type IN ('PERCENT_TOTAL', 'FIXED_TOTAL', 'CATEGORY_PERCENT')),
+  value_num REAL NOT NULL,
+  cap_cents INTEGER,
+  category TEXT,
+  start_time TEXT,
+  end_time TEXT,
+  days_mask TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  auto_apply INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS order_items (
@@ -83,6 +103,31 @@ CREATE TABLE IF NOT EXISTS payments (
   change_cents INTEGER,
   created_at TEXT NOT NULL,
   FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS kitchen_tickets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK (status IN ('QUEUED', 'PREPARING', 'READY', 'SERVED', 'CANCELLED')),
+  notes TEXT,
+  bumped_by_user_id INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  ready_at TEXT,
+  served_at TEXT,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (bumped_by_user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS kitchen_ticket_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id INTEGER NOT NULL,
+  menu_item_id INTEGER,
+  menu_item_name TEXT NOT NULL,
+  category TEXT,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  FOREIGN KEY (ticket_id) REFERENCES kitchen_tickets(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS inventory_movements (

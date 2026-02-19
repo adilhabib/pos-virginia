@@ -9,11 +9,14 @@ const TABLES_IN_ORDER = [
   "roles",
   "users",
   "menu_items",
+  "promotions",
   "ingredients",
   "recipes",
   "orders",
   "order_items",
   "payments",
+  "kitchen_tickets",
+  "kitchen_ticket_items",
   "cash_sessions",
   "cash_transactions",
   "inventory_movements",
@@ -93,4 +96,3 @@ run().catch((error) => {
   console.error("Backfill failed:", error.message || error);
   process.exit(1);
 });
-

@@ -21,10 +21,13 @@
     const [statusMsg, setStatusMsg] = useState("");
     const [orderId, setOrderId] = useState(null);
     const [orderData, setOrderData] = useState(null);
+    const [openOrders, setOpenOrders] = useState([]);
+    const [promotions, setPromotions] = useState([]);
     const [customerName, setCustomerName] = useState("");
     const [customerPhone, setCustomerPhone] = useState("");
     const [discountMode, setDiscountMode] = useState("amount");
     const [discountValue, setDiscountValue] = useState("");
+    const [promoCodeInput, setPromoCodeInput] = useState("");
     const [activeTab, setActiveTab] = useState("ALL");
     const [showEditor, setShowEditor] = useState(false);
     const [newName, setNewName] = useState("");
@@ -43,14 +46,26 @@
       setMenu(await window.POSUtils.orders.listMenu(user.id, canManageMenu));
     }
 
+    async function loadOpenOrders() {
+      const rows = await window.POSUtils.orders.listOpenOrders(user.id);
+      setOpenOrders(rows);
+    }
+
+    async function loadPromotions() {
+      const rows = await window.POSUtils.orders.listPromotions();
+      setPromotions(rows.filter((p) => p.active));
+    }
+
     async function refreshOrder(id) {
       const resp = await window.POSUtils.orders.getOrder(id);
       setOrderData(resp);
       setCustomerName(resp.order.customer_name || "");
       setCustomerPhone(resp.order.customer_phone || "");
+      setPromoCodeInput(resp.order.promo_code || "");
       setDiscountMode("amount");
-      setDiscountValue(((resp.order.discount_cents || 0) / 100).toFixed(2));
+      setDiscountValue(((resp.order.manual_discount_cents || 0) / 100).toFixed(2));
       onOrderSelected(resp.order, resp.items);
+      await loadOpenOrders();
     }
 
     async function ensureOrder() {
@@ -61,6 +76,7 @@
       }
       setOrderId(id);
       await refreshOrder(id);
+      await loadOpenOrders();
       return id;
     }
 
@@ -99,11 +115,38 @@
       const id = await ensureOrder();
       setError("");
       try {
-        await window.POSUtils.orders.updateOrderDiscount(id, dynamicDiscountCents, user.id);
+        await window.POSUtils.orders.updateOrderDiscount(id, requestedManualDiscountCents, user.id);
         await refreshOrder(id);
         setStatusMsg("Discount applied.");
       } catch (err) {
         setError(err.message || "Unable to apply discount.");
+      }
+    }
+
+    async function applyPromoCode() {
+      const id = await ensureOrder();
+      setError("");
+      setStatusMsg("");
+      try {
+        await window.POSUtils.orders.applyOrderPromo(id, promoCodeInput, user.id);
+        await refreshOrder(id);
+        setStatusMsg("Promo applied.");
+      } catch (err) {
+        setError(err.message || "Unable to apply promo.");
+      }
+    }
+
+    async function clearPromoCode() {
+      if (!orderId) return;
+      setError("");
+      setStatusMsg("");
+      try {
+        await window.POSUtils.orders.clearOrderPromo(orderId, user.id);
+        await refreshOrder(orderId);
+        setPromoCodeInput("");
+        setStatusMsg("Promo removed.");
+      } catch (err) {
+        setError(err.message || "Unable to clear promo.");
       }
     }
 
@@ -118,9 +161,50 @@
         setCustomerName("");
         setCustomerPhone("");
         onOrderSelected(null, []);
+        await loadOpenOrders();
       } catch (err) {
         setError(err.message || "Unable to cancel order.");
       }
+    }
+
+    async function holdOrder() {
+      if (!orderId) return;
+      setError("");
+      try {
+        await window.POSUtils.orders.setOrderStatus(orderId, "HOLD", user.id);
+        setStatusMsg("Order moved to hold.");
+        setOrderId(null);
+        setOrderData(null);
+        setCustomerName("");
+        setCustomerPhone("");
+        onOrderSelected(null, []);
+        await loadOpenOrders();
+      } catch (err) {
+        setError(err.message || "Unable to hold order.");
+      }
+    }
+
+    async function recallOrder(selectedOrderId) {
+      setError("");
+      try {
+        await window.POSUtils.orders.setOrderStatus(selectedOrderId, "DRAFT", user.id);
+        setOrderId(selectedOrderId);
+        await refreshOrder(selectedOrderId);
+        setStatusMsg(`Order #${selectedOrderId} loaded.`);
+      } catch (err) {
+        setError(err.message || "Unable to load order.");
+      }
+    }
+
+    function startNewOrder() {
+      setOrderId(null);
+      setOrderData(null);
+      setCustomerName("");
+      setCustomerPhone("");
+      setDiscountMode("amount");
+      setDiscountValue("");
+      onOrderSelected(null, []);
+      setStatusMsg("Started a new order.");
     }
 
     async function finalizeOrder() {
@@ -207,6 +291,8 @@
       (async () => {
         try {
           await loadMenu();
+          await loadOpenOrders();
+          await loadPromotions();
         } catch (err) {
           setError(err.message || "Failed to load menu.");
         } finally {
@@ -243,13 +329,17 @@
     const billItems = orderData?.items || [];
     const subtotal = orderData?.order?.subtotal_cents || 0;
     const discount = orderData?.order?.discount_cents || 0;
+    const manualDiscountApplied = orderData?.order?.manual_discount_cents || 0;
+    const promoDiscountApplied = orderData?.order?.promo_discount_cents || 0;
+    const activePromoCode = orderData?.order?.promo_code || "";
     const total = orderData?.order?.total_cents || 0;
     const discountNumeric = Number(discountValue || 0);
-    const requestedDiscountCents = discountMode === "percent"
+    const requestedManualDiscountCents = discountMode === "percent"
       ? Math.round((subtotal * Math.max(0, discountNumeric)) / 100)
       : Math.round(Math.max(0, discountNumeric) * 100);
-    const dynamicDiscountCents = Math.min(requestedDiscountCents, subtotal);
-    const dynamicTotal = Math.max(0, subtotal - dynamicDiscountCents);
+    const manualDiscountPreview = Math.min(requestedManualDiscountCents, Math.max(0, subtotal - promoDiscountApplied));
+    const discountPreview = Math.min(subtotal, manualDiscountPreview + promoDiscountApplied);
+    const dynamicTotal = Math.max(0, subtotal - discountPreview);
     const guestLabel = customerName.trim() ? customerName.trim() : "Guest";
     const mobileLabel = customerPhone.trim() ? customerPhone.trim() : "-";
 
@@ -402,6 +492,52 @@
             </div>
           </div>
 
+          <div className="summary-discount-controls">
+            <span>PROMO CODE</span>
+            <div className="row">
+              <input
+                value={promoCodeInput}
+                onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                placeholder="Enter promo code"
+              />
+              <button onClick={applyPromoCode}>Apply</button>
+              <button onClick={clearPromoCode} disabled={!orderId || !activePromoCode}>Clear</button>
+            </div>
+            <div className="muted">Active: {activePromoCode || "Auto/None"}</div>
+            <div className="muted">
+              Available:{" "}
+              {promotions
+                .filter((p) => p.code)
+                .map((p) => p.code)
+                .join(", ") || "-"}
+            </div>
+          </div>
+
+          <div className="open-orders-panel">
+            <div className="open-orders-head">
+              <strong>OPEN / HOLD ORDERS</strong>
+              <button onClick={loadOpenOrders}>Refresh</button>
+            </div>
+            <div className="open-orders-list">
+              {openOrders.length === 0 ? (
+                <p className="muted">No open orders.</p>
+              ) : (
+                openOrders.map((row) => (
+                  <button
+                    key={row.id}
+                    className={orderId === row.id ? "open-order-chip active" : "open-order-chip"}
+                    onClick={() => recallOrder(row.id)}
+                  >
+                    <span>#{row.id}</span>
+                    <span>{row.status}</span>
+                    <span>{row.item_count} item(s)</span>
+                    <span>{money(row.total_cents || 0)}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
           <div className="summary-items">
             {billItems.length === 0 ? (
               <p className="muted">No items selected</p>
@@ -428,13 +564,17 @@
 
           <div className="summary-totals">
             <div><span>SUBTOTAL</span><b>{money(subtotal)}</b></div>
+            <div><span>MANUAL DISC (APPLIED)</span><b>{money(manualDiscountApplied)}</b></div>
+            <div><span>PROMO DISC (APPLIED)</span><b>{money(promoDiscountApplied)}</b></div>
             <div><span>DISCOUNT (APPLIED)</span><b>{money(discount)}</b></div>
-            <div><span>DISCOUNT (PREVIEW)</span><b>{money(dynamicDiscountCents)}</b></div>
+            <div><span>DISCOUNT (PREVIEW)</span><b>{money(discountPreview)}</b></div>
             <div><span>TOTAL (PREVIEW)</span><b>{money(dynamicTotal)}</b></div>
             <div className="grand"><span>TOTAL</span><b>{money(total)}</b></div>
           </div>
 
           <div className="summary-actions">
+            <button onClick={startNewOrder}>NEW</button>
+            <button onClick={holdOrder} disabled={!orderId}>HOLD</button>
             <button className="danger-lite" onClick={cancelOrder}>CANCEL ORDER</button>
             <button className="send-lite" onClick={finalizeOrder}>SEND ORDER</button>
           </div>
