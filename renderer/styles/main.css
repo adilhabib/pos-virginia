@@ -316,6 +316,10 @@ select {
 
 .food-photo {
   height: 160px;
+  display: grid;
+  place-items: center;
+  font-size: 66px;
+  background: #e8edf0;
 }
 
 .food-title {
@@ -335,17 +339,6 @@ select {
 
 .food-cat-line span {
   font-size: 0.78rem;
-}
-
-.food-cat-line em {
-  background: #d9a36d;
-  color: #fff;
-  border-radius: 50%;
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  font-style: normal;
 }
 
 .course-tabs {

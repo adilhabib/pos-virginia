@@ -11,6 +11,20 @@
       background: `linear-gradient(135deg, hsl(${hueA} 55% 35%), hsl(${hueB} 60% 58%))`
     };
   }
+  function categoryIcon(category) {
+    const key = String(category || "").trim().toLowerCase();
+    if (!key) return "\u{1F37D}";
+    if (key.includes("pizza")) return "\u{1F355}";
+    if (key.includes("burger") || key.includes("sandwich")) return "\u{1F354}";
+    if (key.includes("drink") || key.includes("beverage") || key.includes("juice") || key.includes("coffee") || key.includes("tea")) return "\u{1F964}";
+    if (key.includes("dessert") || key.includes("sweet") || key.includes("cake")) return "\u{1F370}";
+    if (key.includes("fries") || key.includes("snack") || key.includes("side")) return "\u{1F35F}";
+    if (key.includes("salad")) return "\u{1F957}";
+    if (key.includes("rice") || key.includes("biryani")) return "\u{1F35B}";
+    if (key.includes("chicken")) return "\u{1F357}";
+    if (key.includes("seafood") || key.includes("fish")) return "\u{1F41F}";
+    return "\u{1F372}";
+  }
 
   function OrderScreen({ user, onOrderSelected }) {
     const canManageMenu = user.role === "ADMIN" || user.role === "MANAGER";
@@ -440,12 +454,11 @@
             ) : (
               visibleMenu.map((item) => (
                 <button key={item.id} className="food-replica-card" onClick={() => addItem(item.id)}>
-                  <div className="food-photo" style={imageStyleFromName(item.name)} />
+                  <div className="food-photo" title={item.category || ""}>{categoryIcon(item.category)}</div>
                   <div className="food-title">{item.name}</div>
                   <div className="food-cat-line">
                     <span>CATEGORY:</span>
-                    <em>{item.category.slice(0, 1)}</em>
-                    <i>HOT</i>
+                    <i>{item.category || "-"}</i>
                   </div>
                 </button>
               ))
