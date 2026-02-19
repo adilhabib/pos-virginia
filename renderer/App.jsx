@@ -173,7 +173,7 @@ function App() {
           {activeScreen === "kds" && <window.POSComponents.KDS user={user} />}
           {activeScreen === "inventory" && <window.POSComponents.Inventory user={user} />}
           {activeScreen === "cash" && <window.POSComponents.CashSession user={user} />}
-          {activeScreen === "reports" && <window.POSComponents.Reports />}
+          {activeScreen === "reports" && <window.POSComponents.Reports user={user} />}
         </main>
       </div>
     </div>

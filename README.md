@@ -14,6 +14,7 @@ Supabase-native fast-food POS desktop app built with Electron and React.
 - Kitchen display system (KDS): queued/preparing/ready/served workflow
 - Cash sessions: open/close shift, cash in/out, reconciliation variance
 - Reporting: sales summary, low-stock alerts, cash sessions, audit logs, procurement snapshot, and top suppliers
+- Backup system: automatic daily JSON snapshots plus manual backup/restore from Reports
 - CSV export for paid orders
 - Audit trail for key actions
 - Hardware touchpoints simulated via IPC: receipt, KOT, cash drawer signal
@@ -88,6 +89,10 @@ Expect `dataSource: "supabase"` and `connected: true`.
 ```bash
 npm run supabase:clear
 ```
+
+- App backup folder:
+  - `backup/daily_backups/` (data snapshots)
+  - `backup/receipts/` (generated receipt PDFs)
 
 ## Default Login Users
 

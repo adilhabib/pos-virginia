@@ -63,7 +63,10 @@
       setCustomerPhone(resp.order.customer_phone || "");
       setPromoCodeInput(resp.order.promo_code || "");
       setDiscountMode("amount");
-      setDiscountValue(((resp.order.manual_discount_cents || 0) / 100).toFixed(2));
+      const manualDiscountCents = resp.order.manual_discount_cents != null
+        ? Number(resp.order.manual_discount_cents || 0)
+        : Math.max(0, Number(resp.order.discount_cents || 0) - Number(resp.order.promo_discount_cents || 0));
+      setDiscountValue((manualDiscountCents / 100).toFixed(2));
       onOrderSelected(resp.order, resp.items);
       await loadOpenOrders();
     }
@@ -328,8 +331,9 @@
 
     const billItems = orderData?.items || [];
     const subtotal = orderData?.order?.subtotal_cents || 0;
-    const discount = orderData?.order?.discount_cents || 0;
-    const manualDiscountApplied = orderData?.order?.manual_discount_cents || 0;
+    const manualDiscountApplied = orderData?.order?.manual_discount_cents != null
+      ? Number(orderData?.order?.manual_discount_cents || 0)
+      : Math.max(0, Number(orderData?.order?.discount_cents || 0) - Number(orderData?.order?.promo_discount_cents || 0));
     const promoDiscountApplied = orderData?.order?.promo_discount_cents || 0;
     const activePromoCode = orderData?.order?.promo_code || "";
     const total = orderData?.order?.total_cents || 0;
@@ -337,9 +341,6 @@
     const requestedManualDiscountCents = discountMode === "percent"
       ? Math.round((subtotal * Math.max(0, discountNumeric)) / 100)
       : Math.round(Math.max(0, discountNumeric) * 100);
-    const manualDiscountPreview = Math.min(requestedManualDiscountCents, Math.max(0, subtotal - promoDiscountApplied));
-    const discountPreview = Math.min(subtotal, manualDiscountPreview + promoDiscountApplied);
-    const dynamicTotal = Math.max(0, subtotal - discountPreview);
     const guestLabel = customerName.trim() ? customerName.trim() : "Guest";
     const mobileLabel = customerPhone.trim() ? customerPhone.trim() : "-";
 
@@ -563,13 +564,10 @@
           </div>
 
           <div className="summary-totals">
-            <div><span>SUBTOTAL</span><b>{money(subtotal)}</b></div>
-            <div><span>MANUAL DISC (APPLIED)</span><b>{money(manualDiscountApplied)}</b></div>
-            <div><span>PROMO DISC (APPLIED)</span><b>{money(promoDiscountApplied)}</b></div>
-            <div><span>DISCOUNT (APPLIED)</span><b>{money(discount)}</b></div>
-            <div><span>DISCOUNT (PREVIEW)</span><b>{money(discountPreview)}</b></div>
-            <div><span>TOTAL (PREVIEW)</span><b>{money(dynamicTotal)}</b></div>
-            <div className="grand"><span>TOTAL</span><b>{money(total)}</b></div>
+            <div><span>Subtotal:</span><b>{money(subtotal)}</b></div>
+            <div><span>Discount:</span><b>{money(manualDiscountApplied)}</b></div>
+            <div><span>Promo:</span><b>{money(promoDiscountApplied)}</b></div>
+            <div className="grand"><span>Total:</span><b>{money(total)}</b></div>
           </div>
 
           <div className="summary-actions">

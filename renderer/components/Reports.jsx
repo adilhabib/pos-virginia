@@ -2,24 +2,32 @@
   const { useEffect, useState } = React;
   const { money } = window.POSUtils.db;
 
-  function Reports() {
+  function Reports({ user }) {
     const [range, setRange] = useState("daily");
     const [summary, setSummary] = useState(null);
     const [register, setRegister] = useState(null);
     const [procurement, setProcurement] = useState(null);
+    const [backups, setBackups] = useState([]);
+    const [selectedBackup, setSelectedBackup] = useState("");
     const [error, setError] = useState("");
     const [message, setMessage] = useState("");
 
     async function load() {
       setError("");
-      const [summaryResp, registerResp] = await Promise.all([
+      const [summaryResp, registerResp, backupResp] = await Promise.all([
         window.posAPI.getReportSummary({ range }),
-        window.posAPI.getDailyRegister()
+        window.posAPI.getDailyRegister(),
+        window.posAPI.listBackups()
       ]);
       if (!summaryResp.ok) throw new Error(summaryResp.error || "Failed to load summary.");
       if (!registerResp.ok) throw new Error(registerResp.error || "Failed to load daily register.");
+      if (!backupResp.ok) throw new Error(backupResp.error || "Failed to load backups.");
       setSummary(summaryResp.summary);
       setRegister(registerResp.register);
+      setBackups(backupResp.backups || []);
+      if (!selectedBackup && (backupResp.backups || []).length) {
+        setSelectedBackup(backupResp.backups[0].fileName);
+      }
       const procurementResp = await window.posAPI.getProcurementReport();
       if (!procurementResp.ok) throw new Error(procurementResp.error || "Failed to load procurement report.");
       setProcurement(procurementResp.procurement);
@@ -34,6 +42,40 @@
         return;
       }
       setMessage(`CSV exported to: ${resp.filePath}`);
+    }
+    
+    async function createBackupNow() {
+      setError("");
+      setMessage("");
+      const resp = await window.posAPI.createBackup({ userId: user?.id });
+      if (!resp.ok) {
+        setError(resp.error || "Backup failed.");
+        return;
+      }
+      const listResp = await window.posAPI.listBackups();
+      if (listResp.ok) {
+        setBackups(listResp.backups || []);
+        if (resp.fileName) setSelectedBackup(resp.fileName);
+      }
+      setMessage(`Backup created: ${resp.fileName}`);
+    }
+
+    async function restoreSelectedBackup() {
+      if (!selectedBackup) {
+        setError("Select a backup file first.");
+        return;
+      }
+      const confirmRestore = window.confirm("Restore will replace current POS data. Continue?");
+      if (!confirmRestore) return;
+      setError("");
+      setMessage("");
+      const resp = await window.posAPI.restoreBackup({ userId: user?.id, fileName: selectedBackup });
+      if (!resp.ok) {
+        setError(resp.error || "Restore failed.");
+        return;
+      }
+      setMessage(`Backup restored: ${resp.fileName}`);
+      await load();
     }
 
     useEffect(() => {
@@ -237,6 +279,32 @@
                 <tr key={`supplier-${s.supplier}`}>
                   <td>{s.supplier}</td>
                   <td>{money(s.total_cost_cents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3>Backup & Restore</h3>
+          <div className="row">
+            <button className="primary" onClick={createBackupNow}>Create Backup Now</button>
+            <select value={selectedBackup} onChange={(e) => setSelectedBackup(e.target.value)}>
+              <option value="">Select backup</option>
+              {backups.map((b) => (
+                <option key={b.fileName} value={b.fileName}>{b.fileName}</option>
+              ))}
+            </select>
+            <button onClick={restoreSelectedBackup}>Restore Selected</button>
+          </div>
+          <table className="table">
+            <thead>
+              <tr><th>File</th><th>Modified</th><th>Size (KB)</th></tr>
+            </thead>
+            <tbody>
+              {backups.map((b) => (
+                <tr key={`backup-${b.fileName}`}>
+                  <td>{b.fileName}</td>
+                  <td>{b.modifiedAt}</td>
+                  <td>{(Number(b.sizeBytes || 0) / 1024).toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>

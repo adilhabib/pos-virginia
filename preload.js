@@ -50,5 +50,8 @@ contextBridge.exposeInMainWorld("posAPI", {
   printReceipt: (payload) => ipcRenderer.invoke("system:print-receipt", payload),
   sendKot: (payload) => ipcRenderer.invoke("system:send-kot", payload),
   openCashDrawer: () => ipcRenderer.invoke("system:open-cash-drawer"),
+  createBackup: (payload) => ipcRenderer.invoke("system:create-backup", payload),
+  listBackups: () => ipcRenderer.invoke("system:list-backups"),
+  restoreBackup: (payload) => ipcRenderer.invoke("system:restore-backup", payload),
   getSupabaseStatus: () => ipcRenderer.invoke("system:supabase-status")
 });

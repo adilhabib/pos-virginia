@@ -6,12 +6,24 @@ require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 
 const RECEIPTS_DIR = path.join(__dirname, "backup", "receipts");
+const DAILY_BACKUPS_DIR = path.join(__dirname, "backup", "daily_backups");
 let sb = null;
 const sbState = { enabled: false, url: null, lastCheckAt: null, lastSyncAt: null, lastSyncError: null, dataSource: "supabase" };
 const now = () => new Date().toISOString();
 const money = (c) => new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", currencyDisplay: "narrowSymbol", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(c || 0) / 100);
 const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;");
 const hashPin = (pin) => crypto.createHash("sha256").update(String(pin)).digest("hex");
+const schemaCompat = { ordersHasManualDiscountCents: true };
+
+function isMissingManualDiscountColumnError(error) {
+  return /manual_discount_cents/i.test(String(error?.message || error || ""));
+}
+function stripManualDiscount(row) {
+  if (!row || typeof row !== "object") return row;
+  if (!Object.prototype.hasOwnProperty.call(row, "manual_discount_cents")) return row;
+  const { manual_discount_cents, ...rest } = row;
+  return rest;
+}
 
 function todayKey(v) {
   const d = new Date(v);
@@ -43,14 +55,26 @@ async function q(table, fn) {
 }
 async function get(table, id) { const r = await q(table, (x) => x.eq("id", id).limit(1)); return r[0] || null; }
 async function ins(table, row) {
-  const { data, error } = await sb.from(table).insert(row).select("*").single();
+  const payload = table === "orders" && !schemaCompat.ordersHasManualDiscountCents ? stripManualDiscount(row) : row;
+  let { data, error } = await sb.from(table).insert(payload).select("*").single();
+  if (error && table === "orders" && isMissingManualDiscountColumnError(error) && schemaCompat.ordersHasManualDiscountCents) {
+    schemaCompat.ordersHasManualDiscountCents = false;
+    ({ data, error } = await sb.from(table).insert(stripManualDiscount(row)).select("*").single());
+  }
   if (error) throw new Error(error.message);
   sbState.lastSyncAt = now();
   return data;
 }
 async function upd(table, fn, patch) {
-  let qb = sb.from(table).update(patch); qb = fn(qb);
-  const { data, error } = await qb.select("*");
+  const payload = table === "orders" && !schemaCompat.ordersHasManualDiscountCents ? stripManualDiscount(patch) : patch;
+  let qb = sb.from(table).update(payload); qb = fn(qb);
+  let { data, error } = await qb.select("*");
+  if (error && table === "orders" && isMissingManualDiscountColumnError(error) && schemaCompat.ordersHasManualDiscountCents) {
+    schemaCompat.ordersHasManualDiscountCents = false;
+    qb = sb.from(table).update(stripManualDiscount(patch));
+    qb = fn(qb);
+    ({ data, error } = await qb.select("*"));
+  }
   if (error) throw new Error(error.message);
   sbState.lastSyncAt = now();
   return data || [];
@@ -59,6 +83,130 @@ async function del(table, fn) {
   const { error } = await fn(sb.from(table).delete());
   if (error) throw new Error(error.message);
   sbState.lastSyncAt = now();
+}
+async function listAllRows(table) {
+  const page = 1000;
+  let from = 0;
+  const out = [];
+  while (true) {
+    const to = from + page - 1;
+    const { data, error } = await sb.from(table).select("*").order("id", { ascending: true }).range(from, to);
+    if (error) throw new Error(error.message);
+    if (!data || !data.length) break;
+    out.push(...data);
+    if (data.length < page) break;
+    from += page;
+  }
+  return out;
+}
+async function insertRows(table, rows) {
+  const page = 500;
+  for (let i = 0; i < rows.length; i += page) {
+    const chunk = rows.slice(i, i + page);
+    const { error } = await sb.from(table).insert(chunk);
+    if (error) throw new Error(error.message);
+  }
+}
+async function createDataBackup(userId, mode = "manual") {
+  const tables = [
+    "roles",
+    "users",
+    "menu_items",
+    "ingredients",
+    "promotions",
+    "orders",
+    "recipes",
+    "order_items",
+    "payments",
+    "kitchen_tickets",
+    "kitchen_ticket_items",
+    "inventory_movements",
+    "purchase_orders",
+    "purchase_order_items",
+    "cash_sessions",
+    "cash_transactions",
+    "audit_logs"
+  ];
+  const data = {};
+  for (const table of tables) data[table] = await listAllRows(table);
+  const stamp = now().replace(/[:.]/g, "-");
+  const fileName = `pos-backup-${mode}-${stamp}.json`;
+  const filePath = path.join(DAILY_BACKUPS_DIR, fileName);
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, created_at: now(), mode, tables: data }, null, 2), "utf8");
+  await audit(userId || null, "BACKUP_CREATED", { mode, filePath });
+  return { fileName, filePath };
+}
+function listBackupFiles() {
+  if (!fs.existsSync(DAILY_BACKUPS_DIR)) return [];
+  return fs.readdirSync(DAILY_BACKUPS_DIR)
+    .filter((n) => n.toLowerCase().endsWith(".json"))
+    .map((n) => {
+      const fp = path.join(DAILY_BACKUPS_DIR, n);
+      const st = fs.statSync(fp);
+      return { fileName: n, filePath: fp, sizeBytes: st.size, modifiedAt: st.mtime.toISOString() };
+    })
+    .sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1));
+}
+async function restoreDataBackup(userId, fileName) {
+  const safeName = path.basename(String(fileName || "").trim());
+  if (!safeName || safeName.includes("..")) throw new Error("Invalid backup file.");
+  const filePath = path.join(DAILY_BACKUPS_DIR, safeName);
+  if (!fs.existsSync(filePath)) throw new Error("Backup file not found.");
+  const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const tables = parsed?.tables;
+  if (!tables || typeof tables !== "object") throw new Error("Invalid backup payload.");
+
+  const wipeOrder = [
+    "audit_logs",
+    "cash_transactions",
+    "cash_sessions",
+    "purchase_order_items",
+    "purchase_orders",
+    "inventory_movements",
+    "kitchen_ticket_items",
+    "kitchen_tickets",
+    "payments",
+    "order_items",
+    "orders",
+    "recipes",
+    "ingredients",
+    "menu_items",
+    "promotions",
+    "users",
+    "roles"
+  ];
+  const insertOrder = [
+    "roles",
+    "users",
+    "menu_items",
+    "ingredients",
+    "promotions",
+    "orders",
+    "recipes",
+    "order_items",
+    "payments",
+    "kitchen_tickets",
+    "kitchen_ticket_items",
+    "inventory_movements",
+    "purchase_orders",
+    "purchase_order_items",
+    "cash_sessions",
+    "cash_transactions",
+    "audit_logs"
+  ];
+
+  for (const table of wipeOrder) await del(table, (x) => x.neq("id", -1));
+  for (const table of insertOrder) {
+    const rows = Array.isArray(tables[table]) ? tables[table] : [];
+    if (rows.length) await insertRows(table, rows);
+  }
+  await audit(userId || null, "BACKUP_RESTORED", { fileName: safeName });
+  return { fileName: safeName };
+}
+async function ensureDailyBackup() {
+  const day = todayKey(new Date());
+  const hasToday = listBackupFiles().some((f) => f.fileName.includes(day));
+  if (!hasToday) await createDataBackup(null, "auto");
 }
 async function audit(userId, action, payload = null) {
   try { await ins("audit_logs", { user_id: userId || null, action, payload_json: payload ? JSON.stringify(payload) : null, created_at: now() }); } catch (_) {}
@@ -108,11 +256,6 @@ async function recalc(orderId) {
     const p = await q("promotions", (x) => x.eq("active", 1).ilike("code", code).limit(1));
     if (p[0]) { pdisc = promoDiscount(p[0], subtotal, items, menuById); if (pdisc > 0) { promoId = p[0].id; code = p[0].code ? String(p[0].code).toUpperCase() : null; } else code = null; }
     else code = null;
-  } else {
-    const auto = await q("promotions", (x) => x.eq("active", 1).eq("auto_apply", 1));
-    let best = null; let bestD = 0;
-    for (const p of auto) { const d = promoDiscount(p, subtotal, items, menuById); if (d > bestD) { bestD = d; best = p; } }
-    if (best) { pdisc = bestD; promoId = best.id; code = best.code ? String(best.code).toUpperCase() : null; }
   }
   const req = Math.max(0, Math.round(Number(o.manual_discount_cents != null ? o.manual_discount_cents : o.discount_cents || 0)));
   const mdisc = Math.min(req, Math.max(0, subtotal - pdisc));
@@ -251,7 +394,7 @@ function registerIpc() {
   ipcMain.handle("orders:get-payments", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; const pays = await q("payments", (x) => x.eq("order_id", p.orderId).order("id", { ascending: true })); const paid = pays.reduce((a, r) => a + Number(r.amount_cents || 0), 0); return { ok: true, payments: pays, paidCents: paid, remainingCents: Math.max(0, Number(o.total_cents || 0) - paid), orderTotalCents: Number(o.total_cents || 0), status: o.status }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("orders:add-item", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (!["DRAFT", "HOLD"].includes(o.status)) return { ok: false, error: "Only DRAFT/HOLD orders can be edited." }; const mi = await get("menu_items", p.menuItemId); if (!mi) return { ok: false, error: "Menu item not found." }; const qty = Number(p.quantity || 1); if (qty <= 0) return { ok: false, error: "Quantity must be positive." }; if (!p.modifiers) { const ex = await q("order_items", (x) => x.eq("order_id", p.orderId).eq("menu_item_id", p.menuItemId).is("modifiers_json", null).limit(1)); if (ex[0]) { const n = Number(ex[0].quantity || 0) + qty; await upd("order_items", (x) => x.eq("id", ex[0].id), { quantity: n, line_total_cents: Number(mi.price_cents || 0) * n }); } else { await ins("order_items", { order_id: p.orderId, menu_item_id: p.menuItemId, quantity: qty, unit_price_cents: Number(mi.price_cents || 0), line_total_cents: Number(mi.price_cents || 0) * qty, modifiers_json: null }); } } else { await ins("order_items", { order_id: p.orderId, menu_item_id: p.menuItemId, quantity: qty, unit_price_cents: Number(mi.price_cents || 0), line_total_cents: Number(mi.price_cents || 0) * qty, modifiers_json: JSON.stringify(p.modifiers) }); } await recalc(p.orderId); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("orders:update-item-qty", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (!["DRAFT", "HOLD"].includes(o.status)) return { ok: false, error: "Only DRAFT/HOLD orders can be edited." }; const it = await get("order_items", p.orderItemId); if (!it || it.order_id !== p.orderId) return { ok: false, error: "Order item not found." }; const qty = Number(p.quantity); if (qty <= 0) await del("order_items", (x) => x.eq("id", p.orderItemId)); else await upd("order_items", (x) => x.eq("id", p.orderItemId), { quantity: qty, line_total_cents: Number(it.unit_price_cents || 0) * qty }); await recalc(p.orderId); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
-  ipcMain.handle("orders:update-discount", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (["PAID", "CANCELLED"].includes(o.status)) return { ok: false, error: "Discount can be updated only before payment/cancel." }; const req = Math.round(Number(p.discountCents || 0)); if (!Number.isFinite(req) || req < 0) return { ok: false, error: "Invalid discount amount." }; await upd("orders", (x) => x.eq("id", p.orderId), { manual_discount_cents: req, updated_at: now() }); const u = await recalc(p.orderId); await audit(p.userId || null, "ORDER_DISCOUNT_UPDATED", { orderId: p.orderId, discountCents: u.discount_cents }); return { ok: true, manualDiscountCents: u.manual_discount_cents, promoDiscountCents: u.promo_discount_cents, discountCents: u.discount_cents, totalCents: u.total_cents }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
+  ipcMain.handle("orders:update-discount", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (["PAID", "CANCELLED"].includes(o.status)) return { ok: false, error: "Discount can be updated only before payment/cancel." }; const req = Math.round(Number(p.discountCents || 0)); if (!Number.isFinite(req) || req < 0) return { ok: false, error: "Invalid discount amount." }; await upd("orders", (x) => x.eq("id", p.orderId), { manual_discount_cents: req, discount_cents: req, updated_at: now() }); const u = await recalc(p.orderId); await audit(p.userId || null, "ORDER_DISCOUNT_UPDATED", { orderId: p.orderId, discountCents: u.discount_cents }); const manualDiscountCents = u.manual_discount_cents != null ? Number(u.manual_discount_cents || 0) : Math.max(0, Number(u.discount_cents || 0) - Number(u.promo_discount_cents || 0)); return { ok: true, manualDiscountCents, promoDiscountCents: u.promo_discount_cents, discountCents: u.discount_cents, totalCents: u.total_cents }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("orders:apply-promo", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (["PAID", "CANCELLED"].includes(o.status)) return { ok: false, error: "Promo can be applied only before payment/cancel." }; const code = String(p.promoCode || "").trim().toUpperCase(); if (!code) return { ok: false, error: "Promo code is required." }; const pr = await q("promotions", (x) => x.eq("active", 1).ilike("code", code).limit(1)); if (!pr[0]) return { ok: false, error: "Invalid promo code." }; if (!promoTimeOk(pr[0])) return { ok: false, error: "Promo is not active at this time." }; await upd("orders", (x) => x.eq("id", p.orderId), { promo_code: code, promo_id: pr[0].id, updated_at: now() }); const u = await recalc(p.orderId); await audit(p.userId || null, "ORDER_PROMO_APPLIED", { orderId: p.orderId, promoCode: code, promoId: pr[0].id }); return { ok: true, promo: u }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("orders:clear-promo", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (["PAID", "CANCELLED"].includes(o.status)) return { ok: false, error: "Promo can be cleared only before payment/cancel." }; await upd("orders", (x) => x.eq("id", p.orderId), { promo_code: null, promo_id: null, promo_discount_cents: 0, updated_at: now() }); await recalc(p.orderId); await audit(p.userId || null, "ORDER_PROMO_CLEARED", { orderId: p.orderId }); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("orders:update-customer", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (!["DRAFT", "HOLD"].includes(o.status)) return { ok: false, error: "Customer details can be updated only for DRAFT/HOLD orders." }; await upd("orders", (x) => x.eq("id", p.orderId), { customer_name: p.customerName ? String(p.customerName).trim() : null, customer_phone: p.customerPhone ? String(p.customerPhone).trim() : null, updated_at: now() }); await audit(p.userId || null, "ORDER_CUSTOMER_UPDATED", { orderId: p.orderId }); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
@@ -333,6 +476,9 @@ function registerIpc() {
   ipcMain.handle("system:print-receipt", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; const fp = await receiptPdf(p.orderId); await audit(null, "RECEIPT_PRINT_REQUESTED", { orderId: p.orderId, receiptPath: fp }); return { ok: true, message: "Receipt generated.", receiptPath: fp }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("system:send-kot", async (_, p) => { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; await audit(null, "KOT_PRINT_REQUESTED", { orderId: p.orderId }); return { ok: true, message: "KOT print request queued (simulated)." }; });
   ipcMain.handle("system:open-cash-drawer", async () => { await audit(null, "CASH_DRAWER_OPENED", {}); return { ok: true, message: "Cash drawer signal triggered (simulated)." }; });
+  ipcMain.handle("system:create-backup", async (_, p = {}) => { try { if (!(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can create backup." }; const x = await createDataBackup(p.userId || null, "manual"); return { ok: true, ...x }; } catch (e) { return { ok: false, error: e.message || "Failed to create backup." }; } });
+  ipcMain.handle("system:list-backups", async () => { try { return { ok: true, backups: listBackupFiles() }; } catch (e) { return { ok: false, error: e.message || "Failed to list backups." }; } });
+  ipcMain.handle("system:restore-backup", async (_, p = {}) => { try { if (!(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can restore backup." }; const x = await restoreDataBackup(p.userId || null, p.fileName); return { ok: true, ...x }; } catch (e) { return { ok: false, error: e.message || "Failed to restore backup." }; } });
   ipcMain.handle("system:supabase-status", async () => { if (!sbState.enabled || !sb) return { ok: true, supabase: { ...sbState, connected: false } }; try { const { error } = await sb.from("orders").select("id", { head: true, count: "exact" }); if (error) throw error; sbState.lastCheckAt = now(); sbState.lastSyncError = null; return { ok: true, supabase: { ...sbState, connected: true } }; } catch (e) { sbState.lastSyncError = String(e.message || e); sbState.lastCheckAt = now(); return { ok: true, supabase: { ...sbState, connected: false } }; } });
 }
 
@@ -343,6 +489,7 @@ function createMainWindow() {
 
 app.whenReady().then(async () => {
   fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
+  fs.mkdirSync(DAILY_BACKUPS_DIR, { recursive: true });
   const u = String(process.env.SUPABASE_URL || "").trim();
   const pid = String(process.env.SUPABASE_PROJECT_ID || "").trim();
   const url = u || (pid ? `https://${pid}.supabase.co` : "");
@@ -352,6 +499,7 @@ app.whenReady().then(async () => {
   const ping = await sb.from("roles").select("id", { head: true, count: "exact" });
   if (ping.error) { console.error("Supabase connection failed:", ping.error.message); app.quit(); return; }
   sbState.enabled = true; sbState.url = url; sbState.lastCheckAt = now(); sbState.lastSyncAt = now(); sbState.lastSyncError = null;
+  await ensureDailyBackup();
   registerIpc();
   createMainWindow();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); });
