@@ -28,6 +28,10 @@ contextBridge.exposeInMainWorld("posAPI", {
   purchaseInventory: (payload) => ipcRenderer.invoke("inventory:purchase", payload),
   createIngredient: (payload) => ipcRenderer.invoke("inventory:create-ingredient", payload),
   updateIngredient: (payload) => ipcRenderer.invoke("inventory:update-ingredient", payload),
+  createPurchaseOrder: (payload) => ipcRenderer.invoke("procurement:create-po", payload),
+  listPurchaseOrders: (payload) => ipcRenderer.invoke("procurement:list-po", payload),
+  getPurchaseOrder: (payload) => ipcRenderer.invoke("procurement:get-po", payload),
+  receivePurchaseOrder: (payload) => ipcRenderer.invoke("procurement:receive-po", payload),
 
   openCashSession: (payload) => ipcRenderer.invoke("cash:open-session", payload),
   getOpenCashSession: () => ipcRenderer.invoke("cash:get-open-session"),
@@ -39,6 +43,7 @@ contextBridge.exposeInMainWorld("posAPI", {
   bumpKitchenTicket: (payload) => ipcRenderer.invoke("kds:bump", payload),
 
   getReportSummary: (payload) => ipcRenderer.invoke("reports:summary", payload),
+  getProcurementReport: () => ipcRenderer.invoke("reports:procurement"),
   getDailyRegister: () => ipcRenderer.invoke("reports:daily-register"),
   exportReportCsv: (payload) => ipcRenderer.invoke("reports:export-csv", payload),
 

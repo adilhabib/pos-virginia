@@ -1,5 +1,6 @@
 (function () {
   const { useEffect, useMemo, useState } = React;
+  const { money } = window.POSUtils.db;
 
   function Inventory({ user }) {
     const canManage = user.role === "ADMIN" || user.role === "MANAGER";
@@ -21,11 +22,25 @@
     const [newStock, setNewStock] = useState("");
     const [newThreshold, setNewThreshold] = useState("");
     const [newSupplier, setNewSupplier] = useState("");
+    const [poSupplier, setPoSupplier] = useState("");
+    const [poNotes, setPoNotes] = useState("");
+    const [poIngredientId, setPoIngredientId] = useState("");
+    const [poQty, setPoQty] = useState("");
+    const [poUnitCost, setPoUnitCost] = useState("");
+    const [poDraftItems, setPoDraftItems] = useState([]);
+    const [poList, setPoList] = useState([]);
+    const [activePoId, setActivePoId] = useState("");
+    const [activePoDetail, setActivePoDetail] = useState(null);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
 
     async function load() {
-      setIngredients(await window.POSUtils.inventory.listIngredients());
+      const [ingredientRows, poRows] = await Promise.all([
+        window.POSUtils.inventory.listIngredients(),
+        window.POSUtils.inventory.listPurchaseOrders()
+      ]);
+      setIngredients(ingredientRows);
+      setPoList(poRows);
     }
 
     useEffect(() => {
@@ -118,6 +133,84 @@
       }
     }
 
+    function addPoLine() {
+      const ingredientId = Number(poIngredientId || 0);
+      const qtyNum = Number(poQty || 0);
+      const unitCostNum = Math.max(0, Math.round(Number(poUnitCost || 0)));
+      if (!ingredientId || qtyNum <= 0) {
+        setError("Select ingredient and enter valid quantity for PO item.");
+        return;
+      }
+      const ingredient = ingredients.find((i) => Number(i.id) === ingredientId);
+      if (!ingredient) {
+        setError("Ingredient not found.");
+        return;
+      }
+      setPoDraftItems((prev) => [
+        ...prev,
+        { ingredientId, ingredientName: ingredient.name, qty: qtyNum, unitCostCents: unitCostNum }
+      ]);
+      setPoIngredientId("");
+      setPoQty("");
+      setPoUnitCost("");
+      setError("");
+    }
+
+    function removePoLine(index) {
+      setPoDraftItems((prev) => prev.filter((_, i) => i !== index));
+    }
+
+    async function createPO() {
+      setError("");
+      setMessage("");
+      try {
+        await window.POSUtils.inventory.createPurchaseOrder(
+          user.id,
+          poSupplier,
+          poNotes,
+          poDraftItems
+        );
+        setMessage("Purchase order created.");
+        setPoSupplier("");
+        setPoNotes("");
+        setPoDraftItems([]);
+        setActivePoId("");
+        setActivePoDetail(null);
+        await load();
+      } catch (err) {
+        setError(err.message || "Failed to create purchase order.");
+      }
+    }
+
+    async function openPo(poId) {
+      setError("");
+      try {
+        const detail = await window.POSUtils.inventory.getPurchaseOrder(Number(poId));
+        setActivePoId(String(poId));
+        setActivePoDetail(detail);
+      } catch (err) {
+        setError(err.message || "Failed to load purchase order.");
+      }
+    }
+
+    async function receivePO(poId) {
+      setError("");
+      setMessage("");
+      try {
+        await window.POSUtils.inventory.receivePurchaseOrder(user.id, Number(poId));
+        setMessage(`PO #${poId} received and stock updated.`);
+        await load();
+        await openPo(poId);
+      } catch (err) {
+        setError(err.message || "Failed to receive purchase order.");
+      }
+    }
+
+    const poDraftTotal = poDraftItems.reduce(
+      (acc, item) => acc + Math.round(Number(item.qty || 0) * Number(item.unitCostCents || 0)),
+      0
+    );
+
     if (!canManage) {
       return <div className="card"><h2>Inventory</h2><p className="muted">Only admin/manager can access inventory management.</p></div>;
     }
@@ -170,6 +263,89 @@
           <label>Supplier reference</label>
           <input value={supplierRef} onChange={(e) => setSupplierRef(e.target.value)} placeholder="PO-12345" />
           <button className="primary" onClick={purchase}>Save Purchase Entry</button>
+        </div>
+
+        <div className="card">
+          <h2>Purchase Orders</h2>
+          <label>Supplier</label>
+          <input value={poSupplier} onChange={(e) => setPoSupplier(e.target.value)} placeholder="Supplier name" />
+          <label>Notes</label>
+          <input value={poNotes} onChange={(e) => setPoNotes(e.target.value)} placeholder="PO notes" />
+          <label>Ingredient</label>
+          <select value={poIngredientId} onChange={(e) => setPoIngredientId(e.target.value)}>
+            <option value="">Select ingredient</option>
+            {ingredients.map((i) => <option key={`po-ing-${i.id}`} value={i.id}>{i.name}</option>)}
+          </select>
+          <div className="row">
+            <input value={poQty} onChange={(e) => setPoQty(e.target.value)} placeholder="Qty" />
+            <input value={poUnitCost} onChange={(e) => setPoUnitCost(e.target.value)} placeholder="Unit cost (cents)" />
+            <button onClick={addPoLine}>Add Line</button>
+          </div>
+          <table className="table">
+            <thead>
+              <tr><th>Ingredient</th><th>Qty</th><th>Unit Cost</th><th>Line Cost</th><th></th></tr>
+            </thead>
+            <tbody>
+              {poDraftItems.map((item, index) => (
+                <tr key={`po-line-${index}`}>
+                  <td>{item.ingredientName}</td>
+                  <td>{item.qty}</td>
+                  <td>{money(item.unitCostCents)}</td>
+                  <td>{money(Math.round(Number(item.qty) * Number(item.unitCostCents)))}</td>
+                  <td><button onClick={() => removePoLine(index)}>Remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p><strong>Draft Total:</strong> {money(poDraftTotal)}</p>
+          <button className="primary" onClick={createPO}>Create PO</button>
+        </div>
+
+        <div className="card">
+          <h2>PO Register</h2>
+          <table className="table">
+            <thead>
+              <tr><th>ID</th><th>Supplier</th><th>Status</th><th>Total</th><th></th><th></th></tr>
+            </thead>
+            <tbody>
+              {poList.map((po) => (
+                <tr key={`po-${po.id}`} className={String(activePoId) === String(po.id) ? "selected-row" : ""}>
+                  <td>#{po.id}</td>
+                  <td>{po.supplier}</td>
+                  <td>{po.status}</td>
+                  <td>{money(po.total_cost_cents || 0)}</td>
+                  <td><button onClick={() => openPo(po.id)}>View</button></td>
+                  <td>
+                    {po.status === "OPEN" ? (
+                      <button className="primary" onClick={() => receivePO(po.id)}>Receive</button>
+                    ) : (
+                      <span className="muted">-</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {activePoDetail && (
+            <div className="card">
+              <h3>PO #{activePoDetail.order.id} Items</h3>
+              <table className="table">
+                <thead>
+                  <tr><th>Ingredient</th><th>Qty Ordered</th><th>Qty Received</th><th>Line Cost</th></tr>
+                </thead>
+                <tbody>
+                  {activePoDetail.items.map((line) => (
+                    <tr key={`po-detail-${line.id}`}>
+                      <td>{line.ingredient_name}</td>
+                      <td>{line.qty_ordered}</td>
+                      <td>{line.qty_received}</td>
+                      <td>{money(line.line_cost_cents || 0)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <div className="card">

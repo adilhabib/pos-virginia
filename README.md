@@ -1,53 +1,46 @@
 # FastFood POS
 
-Offline-first fast-food POS desktop app built with Electron, React (renderer), and SQLite.
+Supabase-native fast-food POS desktop app built with Electron and React.
 
 ## Implemented Scope
 
 - PIN-based login with role mapping (`ADMIN`, `MANAGER`, `CASHIER`)
 - Order management: create, add items, hold/cancel/finalize, cash checkout
+- Multi-payment checkout (cash/card/voucher) with partial payments
+- Dynamic pricing support: manual discount + promo engine + time-based promos
 - Ingredient-level inventory deduction through recipe mapping
 - Manual inventory adjustments and purchase entries
+- Procurement module: purchase order creation, PO receiving, and PO register
+- Kitchen display system (KDS): queued/preparing/ready/served workflow
 - Cash sessions: open/close shift, cash in/out, reconciliation variance
-- Reporting: sales summary, low-stock alerts, cash sessions, audit logs
+- Reporting: sales summary, low-stock alerts, cash sessions, audit logs, procurement snapshot, and top suppliers
 - CSV export for paid orders
 - Audit trail for key actions
-- Daily SQLite backup snapshot on app startup
 - Hardware touchpoints simulated via IPC: receipt, KOT, cash drawer signal
 
 ## Project Structure
 
-```
+```text
 fastfood-pos/
-├── README.md
-├── package.json
-├── main.js
-├── preload.js
-├── database/
-│   ├── schema.sql
-│   ├── seed_data.sql
-│   └── pos.db                # auto-created at first run
-├── renderer/
-│   ├── index.html
-│   ├── App.jsx
-│   ├── styles/main.css
-│   ├── components/
-│   │   ├── Login.jsx
-│   │   ├── OrderScreen.jsx
-│   │   ├── Checkout.jsx
-│   │   ├── Inventory.jsx
-│   │   ├── CashSession.jsx
-│   │   └── Reports.jsx
-│   └── utils/
-│       ├── db.js
-│       ├── orders.js
-│       ├── inventory.js
-│       └── cash.js
-├── assets/
-│   ├── logo.png
-│   └── icons/
-└── backup/
-    └── daily_backups/
+|-- README.md
+|-- package.json
+|-- main.js
+|-- preload.js
+|-- database/
+|   |-- supabase_schema.sql
+|   `-- supabase_seed_data.sql
+|-- renderer/
+|   |-- index.html
+|   |-- App.jsx
+|   |-- styles/main.css
+|   |-- components/
+|   `-- utils/
+|-- scripts/
+|   |-- start-electron.js
+|   |-- supabase-clear.js
+|   `-- run-with-electron-node.js
+|-- assets/
+`-- backup/
 ```
 
 ## Setup
@@ -58,56 +51,43 @@ fastfood-pos/
 npm install
 ```
 
-2. Start the app:
-
-```bash
-npm start
-```
-
-3. Optional Supabase mirror sync:
+2. Create env file:
 
 ```bash
 cp .env.example .env
 ```
 
 Set:
-- `POS_DATA_SOURCE` (`sqlite` or `supabase`)
+- `POS_DATA_SOURCE=supabase`
 - `SUPABASE_PROJECT_ID`
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 
-Default mode is `supabase` in current scripts.
-`POS_DATA_SOURCE=supabase` runs Supabase-primary mode (local DB is in-memory cache hydrated from Supabase at startup).
-For best compatibility, create Supabase tables matching `database/schema.sql` names and columns (at minimum: `orders`, `order_items`, `payments`, `cash_sessions`, `cash_transactions`, `menu_items`, `ingredients`, `inventory_movements`, `audit_logs`, `promotions`, `kitchen_tickets`, `kitchen_ticket_items`).
-
-4. In Supabase SQL Editor, run:
-
+3. In Supabase SQL Editor, run:
 - `database/supabase_schema.sql`
 - `database/supabase_seed_data.sql`
 
-This creates required tables, indexes, grants, RLS policies, and default seed data.
-In `POS_DATA_SOURCE=supabase` mode, startup reads data from Supabase into memory and all persistence is in Supabase.
-After that, restart the app and call `window.posAPI.getSupabaseStatus()` from DevTools console to verify connection status.
-
-5. Optional one-time historical backfill (SQLite -> Supabase):
+4. Start app:
 
 ```bash
-npm run supabase:backfill
+npm start
 ```
 
-This upserts all local rows table-by-table in FK-safe order.
+5. Verify connection in DevTools:
 
-6. Reset remote POS data (Supabase):
+```js
+window.posAPI.getSupabaseStatus()
+```
+
+Expect `dataSource: "supabase"` and `connected: true`.
+
+## Utilities
+
+- Clear remote POS data in Supabase:
 
 ```bash
 npm run supabase:clear
 ```
-
-Then restart app to reseed baseline data if needed.
-
-At first launch:
-- runtime schema is initialized.
-- in Supabase mode, local cache hydrates from Supabase; if remote is empty, baseline seed is pushed.
 
 ## Default Login Users
 
@@ -117,5 +97,5 @@ At first launch:
 
 ## Notes
 
+- Source of truth is Supabase.
 - The renderer is loaded directly from `renderer/index.html` using local React + Babel runtime scripts.
-- Receipt/KOT/cash-drawer integrations are simulated, ready to be replaced with device-specific adapters.

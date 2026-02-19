@@ -6,6 +6,7 @@
     const [range, setRange] = useState("daily");
     const [summary, setSummary] = useState(null);
     const [register, setRegister] = useState(null);
+    const [procurement, setProcurement] = useState(null);
     const [error, setError] = useState("");
     const [message, setMessage] = useState("");
 
@@ -19,6 +20,9 @@
       if (!registerResp.ok) throw new Error(registerResp.error || "Failed to load daily register.");
       setSummary(summaryResp.summary);
       setRegister(registerResp.register);
+      const procurementResp = await window.posAPI.getProcurementReport();
+      if (!procurementResp.ok) throw new Error(procurementResp.error || "Failed to load procurement report.");
+      setProcurement(procurementResp.procurement);
     }
 
     async function exportCsv() {
@@ -212,6 +216,31 @@
               ? summary.lowStock.map((i) => <li key={i.id}>{i.name}: {i.stock_qty} (threshold {i.low_stock_threshold})</li>)
               : <li>No low-stock ingredients.</li>}
           </ul>
+
+          <h3>Procurement Snapshot</h3>
+          <table className="table">
+            <tbody>
+              <tr><td>Stock Valuation</td><td>{money(procurement?.stockValuationCents || 0)}</td></tr>
+              <tr><td>Open PO</td><td>{procurement?.openPoCount || 0}</td></tr>
+              <tr><td>Received PO</td><td>{procurement?.receivedPoCount || 0}</td></tr>
+              <tr><td>Today Received Value</td><td>{money(procurement?.todayReceivedValueCents || 0)}</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Top Suppliers (by PO value)</h3>
+          <table className="table">
+            <thead>
+              <tr><th>Supplier</th><th>Total PO Value</th></tr>
+            </thead>
+            <tbody>
+              {(procurement?.topSuppliers || []).map((s) => (
+                <tr key={`supplier-${s.supplier}`}>
+                  <td>{s.supplier}</td>
+                  <td>{money(s.total_cost_cents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     );

@@ -89,6 +89,10 @@ select {
   padding: 8px 6px;
 }
 
+.selected-row {
+  background: #edf4f7;
+}
+
 .muted {
   color: var(--muted);
 }

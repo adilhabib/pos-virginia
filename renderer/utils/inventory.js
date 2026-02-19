@@ -21,12 +21,32 @@
     return assertOk(await window.posAPI.updateIngredient({ userId, ingredientId, ...data }));
   }
 
+  async function createPurchaseOrder(userId, supplier, notes, items) {
+    return assertOk(await window.posAPI.createPurchaseOrder({ userId, supplier, notes, items }));
+  }
+
+  async function listPurchaseOrders(status = null) {
+    return assertOk(await window.posAPI.listPurchaseOrders({ status })).orders;
+  }
+
+  async function getPurchaseOrder(poId) {
+    return assertOk(await window.posAPI.getPurchaseOrder({ poId }));
+  }
+
+  async function receivePurchaseOrder(userId, poId) {
+    return assertOk(await window.posAPI.receivePurchaseOrder({ userId, poId }));
+  }
+
   window.POSUtils = window.POSUtils || {};
   window.POSUtils.inventory = {
     listIngredients,
     adjustIngredient,
     purchaseIngredient,
     createIngredient,
-    updateIngredient
+    updateIngredient,
+    createPurchaseOrder,
+    listPurchaseOrders,
+    getPurchaseOrder,
+    receivePurchaseOrder
   };
 })();

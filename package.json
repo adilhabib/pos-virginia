@@ -1,21 +1,18 @@
 {
   "name": "virginia-pos",
   "version": "1.0.0",
-  "description": "Offline-first fast-food POS for single-outlet desktop operations.",
+  "description": "Supabase-native fast-food POS for single-outlet desktop operations.",
   "main": "main.js",
   "scripts": {
     "start": "node scripts/start-electron.js",
     "lint": "echo \"No linter configured\"",
-    "supabase:clear": "node scripts/run-with-electron-node.js scripts/supabase-clear.js",
-    "supabase:backfill": "node scripts/run-with-electron-node.js scripts/backfill-supabase.js",
-    "rebuild-native": "node scripts/rebuild-native.js",
-    "postinstall": "node scripts/rebuild-native.js"
+    "supabase:clear": "node scripts/run-with-electron-node.js scripts/supabase-clear.js"
   },
   "keywords": [
     "pos",
     "electron",
-    "sqlite",
-    "offline"
+    "supabase",
+    "register"
   ],
   "author": "Generated from pos_plan.md",
   "license": "MIT",
@@ -23,7 +20,6 @@
     "@babel/standalone": "^7.27.7",
     "@react-icons/all-files": "^4.1.0",
     "@supabase/supabase-js": "^2.95.3",
-    "better-sqlite3": "^11.8.1",
     "dotenv": "^17.3.1",
     "electron": "^36.0.0",
     "react": "^18.3.1",
