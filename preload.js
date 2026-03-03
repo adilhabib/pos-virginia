@@ -38,6 +38,15 @@ contextBridge.exposeInMainWorld("posAPI", {
   addCashTransaction: (payload) => ipcRenderer.invoke("cash:add-transaction", payload),
   closeCashSession: (payload) => ipcRenderer.invoke("cash:close-session", payload),
 
+  listEmployees: (payload) => ipcRenderer.invoke("employee:list", payload),
+  createEmployee: (payload) => ipcRenderer.invoke("employee:create", payload),
+  updateEmployee: (payload) => ipcRenderer.invoke("employee:update", payload),
+  addEmployeeLedgerEntry: (payload) => ipcRenderer.invoke("employee:add-ledger-entry", payload),
+  getEmployeeLedger: (payload) => ipcRenderer.invoke("employee:get-ledger", payload),
+  exportEmployeeLedgerCsv: (payload) => ipcRenderer.invoke("employee:export-ledger-csv", payload),
+  deleteEmployeeLedgerEntry: (payload) => ipcRenderer.invoke("employee:delete-ledger-entry", payload),
+  closeEmployeeCurrentMonth: (payload) => ipcRenderer.invoke("employee:close-current-month", payload),
+
   listKitchenTickets: (payload) => ipcRenderer.invoke("kds:list", payload),
   updateKitchenTicketStatus: (payload) => ipcRenderer.invoke("kds:update-status", payload),
   bumpKitchenTicket: (payload) => ipcRenderer.invoke("kds:bump", payload),

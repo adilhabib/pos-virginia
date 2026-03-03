@@ -1,10 +1,11 @@
-const { useMemo, useState } = React;
+const { useEffect, useMemo, useState } = React;
 
 const NAV_ITEMS = [
   { key: "home", target: "orders", label: "HOME", icon: "home", roles: ["ADMIN", "MANAGER", "CASHIER"] },
   { key: "kitchen", target: "kds", label: "KITCHEN", icon: "kitchen", roles: ["ADMIN", "MANAGER", "CASHIER"] },
   { key: "payment", target: "checkout", label: "PAYMENT", icon: "payment", roles: ["ADMIN", "MANAGER", "CASHIER"] },
   { key: "inventory", target: "inventory", label: "INVENTORY", icon: "inventory", roles: ["ADMIN", "MANAGER"] },
+  { key: "employees", target: "employees", label: "EMPLOYEE", icon: "employees", roles: ["ADMIN"] },
   { key: "reports", target: "reports", label: "REPORTS", icon: "reports", roles: ["ADMIN", "MANAGER"] },
   { key: "cash", target: "cash", label: "SETTINGS", icon: "settings", roles: ["ADMIN", "MANAGER", "CASHIER"] }
 ];
@@ -67,6 +68,16 @@ function NavIcon({ name }) {
       </svg>
     );
   }
+  if (name === "employees") {
+    return (
+      <svg {...common}>
+        <circle cx="9" cy="8" r="3" />
+        <path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6" />
+        <circle cx="18" cy="9" r="2" />
+        <path d="M14.5 19c.4-2.2 2.3-4 4.6-4 1.1 0 2.1.4 2.9 1.1" />
+      </svg>
+    );
+  }
   return (
     <svg {...common}>
       <circle cx="12" cy="12" r="3" />
@@ -106,6 +117,9 @@ function App() {
   const [activeScreen, setActiveScreen] = useState("orders");
   const [activeNavKey, setActiveNavKey] = useState("home");
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [cashShiftOpen, setCashShiftOpen] = useState(true);
+  const [cashShiftPromptVisible, setCashShiftPromptVisible] = useState(false);
+  const [cashShiftPromptError, setCashShiftPromptError] = useState("");
 
   const availableNav = useMemo(() => {
     if (!user) return [];
@@ -124,10 +138,64 @@ function App() {
     setSelectedOrder(null);
   }
 
+  async function refreshCashShiftStatus() {
+    if (!user) return;
+    try {
+      const resp = await window.POSUtils.cash.getOpenSession();
+      const isOpen = !!resp?.session && resp.session.status === "OPEN";
+      setCashShiftOpen(isOpen);
+      setCashShiftPromptVisible(!isOpen);
+      setCashShiftPromptError("");
+    } catch (err) {
+      setCashShiftOpen(false);
+      setCashShiftPromptVisible(true);
+      setCashShiftPromptError(err.message || "Unable to verify cash shift status.");
+    }
+  }
+
+  function navigateToCashShift() {
+    setActiveNavKey("cash");
+    setActiveScreen("cash");
+    setCashShiftPromptVisible(false);
+  }
+
+  useEffect(() => {
+    if (!user) {
+      setCashShiftOpen(true);
+      setCashShiftPromptVisible(false);
+      setCashShiftPromptError("");
+      return;
+    }
+    refreshCashShiftStatus();
+    const t = setInterval(() => {
+      refreshCashShiftStatus();
+    }, 15000);
+    return () => clearInterval(t);
+  }, [user]);
+
+  useEffect(() => {
+    if (user && activeScreen !== "cash") {
+      refreshCashShiftStatus();
+    }
+  }, [activeScreen]);
+
   if (!user) return <window.POSComponents.Login onLogin={setUser} />;
 
   return (
     <div className="replica-shell">
+      {cashShiftPromptVisible && (
+        <div className="shift-modal-backdrop">
+          <div className="shift-modal">
+            <h3>Cash shift is not open</h3>
+            <p>Open a cash shift before taking payments.</p>
+            {cashShiftPromptError && <div className="error">{cashShiftPromptError}</div>}
+            <div className="shift-modal-actions">
+              <button className="primary" onClick={navigateToCashShift}>Open Cash Shift</button>
+              <button className="shift-link-btn" onClick={navigateToCashShift}>Go to Cash Session page</button>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="replica-topbar">
         <div className="logo-mark">
           <img className="logo-image" src="../assets/logo.png" alt="POS logo" />
@@ -153,6 +221,11 @@ function App() {
               onClick={() => {
                 setActiveNavKey(item.key);
                 setActiveScreen(item.target);
+                if (item.target === "cash") {
+                  setCashShiftPromptVisible(false);
+                } else if (!cashShiftOpen) {
+                  setCashShiftPromptVisible(true);
+                }
               }}
             >
               <span className="icon"><NavIcon name={item.icon} /></span>
@@ -172,6 +245,7 @@ function App() {
           )}
           {activeScreen === "kds" && <window.POSComponents.KDS user={user} />}
           {activeScreen === "inventory" && <window.POSComponents.Inventory user={user} />}
+          {activeScreen === "employees" && <window.POSComponents.Employees user={user} />}
           {activeScreen === "cash" && <window.POSComponents.CashSession user={user} />}
           {activeScreen === "reports" && <window.POSComponents.Reports user={user} />}
         </main>

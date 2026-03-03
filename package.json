@@ -5,6 +5,8 @@
   "main": "main.js",
   "scripts": {
     "start": "node scripts/start-electron.js",
+    "build": "electron-builder --dir",
+    "dist": "electron-builder",
     "lint": "echo \"No linter configured\"",
     "supabase:clear": "node scripts/run-with-electron-node.js scripts/supabase-clear.js"
   },
@@ -16,14 +18,39 @@
   ],
   "author": "Generated from pos_plan.md",
   "license": "MIT",
+  "build": {
+    "appId": "com.virginia.pos",
+    "productName": "Virginia POS",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "assets/**/*",
+      "scripts/**/*",
+      "database/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  },
   "dependencies": {
     "@babel/standalone": "^7.27.7",
     "@react-icons/all-files": "^4.1.0",
     "@supabase/supabase-js": "^2.95.3",
     "dotenv": "^17.3.1",
-    "electron": "^36.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.5.0"
+  },
+  "devDependencies": {
+    "electron": "^36.0.0",
+    "electron-builder": "^25.1.8"
   }
 }

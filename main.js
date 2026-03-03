@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const dns = require("dns").promises;
 require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 
@@ -125,7 +126,10 @@ async function createDataBackup(userId, mode = "manual") {
     "purchase_order_items",
     "cash_sessions",
     "cash_transactions",
-    "audit_logs"
+    "audit_logs",
+    "employee_register",
+    "employee_ledger",
+    "employee_salary_closures"
   ];
   const data = {};
   for (const table of tables) data[table] = await listAllRows(table);
@@ -173,7 +177,10 @@ async function restoreDataBackup(userId, fileName) {
     "menu_items",
     "promotions",
     "users",
-    "roles"
+    "roles",
+    "employee_ledger",
+    "employee_register",
+    "employee_salary_closures"
   ];
   const insertOrder = [
     "roles",
@@ -192,7 +199,10 @@ async function restoreDataBackup(userId, fileName) {
     "purchase_order_items",
     "cash_sessions",
     "cash_transactions",
-    "audit_logs"
+    "audit_logs",
+    "employee_register",
+    "employee_ledger",
+    "employee_salary_closures"
   ];
 
   for (const table of wipeOrder) await del(table, (x) => x.neq("id", -1));
@@ -216,8 +226,51 @@ async function role(userId) {
   const u = await get("users", userId); if (!u || !u.active) return null;
   const r = await get("roles", u.role_id); return r ? r.name : null;
 }
+async function isAdmin(userId) { const r = await role(userId); return r === "ADMIN"; }
 async function isMgr(userId) { const r = await role(userId); return r === "ADMIN" || r === "MANAGER"; }
 async function openSession() { const r = await q("cash_sessions", (x) => x.eq("status", "OPEN").order("id", { ascending: false }).limit(1)); return r[0] || null; }
+const monthKey = (v) => {
+  const d = new Date(v);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+const monthBounds = (key) => {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(key || ""));
+  if (!m) return null;
+  const y = Number(m[1]); const mm = Number(m[2]);
+  if (!Number.isInteger(y) || !Number.isInteger(mm) || mm < 1 || mm > 12) return null;
+  const from = new Date(y, mm - 1, 1, 0, 0, 0, 0);
+  const to = new Date(y, mm, 0, 23, 59, 59, 999);
+  return { fromMs: from.getTime(), toMs: to.getTime() };
+};
+async function getSalaryClosure(employeeId, mKey) {
+  const rows = await q("employee_salary_closures", (x) => x.eq("employee_id", employeeId).eq("month_key", mKey).limit(1));
+  return rows[0] || null;
+}
+
+function summarizeEmployeeRows(employees, ledgerRowsByEmployeeId) {
+  return employees.map((emp) => {
+    const rows = ledgerRowsByEmployeeId.get(emp.id) || [];
+    const salaryAdjustmentsCents = rows
+      .filter((r) => r.entry_type === "SALARY")
+      .reduce((a, r) => a + Number(r.amount_cents || 0), 0);
+    const creditCents = rows
+      .filter((r) => r.entry_type === "CREDIT")
+      .reduce((a, r) => a + Number(r.amount_cents || 0), 0);
+    const baseSalaryCents = Number(emp.monthly_salary_cents || 0);
+    const totalSalaryCents = baseSalaryCents + salaryAdjustmentsCents;
+    return {
+      ...emp,
+      summary: {
+        baseSalaryCents,
+        salaryAdjustmentsCents,
+        totalSalaryCents,
+        salaryCents: totalSalaryCents,
+        creditCents,
+        netPayableCents: totalSalaryCents - creditCents
+      }
+    };
+  });
+}
 
 async function orderItems(orderId) {
   const items = await q("order_items", (x) => x.eq("order_id", orderId).order("id", { ascending: true }));
@@ -267,8 +320,35 @@ async function recalc(orderId) {
 
 function receiptHtml(data) {
   const { order, items, payment } = data;
-  const rows = items.map((i) => `<tr><td>${esc(i.item_name)}</td><td>x${i.quantity}</td><td style="text-align:right">${money(i.line_total_cents)}</td></tr>`).join("");
-  return `<!doctype html><html><head><meta charset="UTF-8"/><style>body{font-family:Arial,sans-serif;padding:10px;font-size:12px;color:#111}h2{margin:0 0 6px;font-size:16px}.muted{color:#666;margin:2px 0}table{width:100%;border-collapse:collapse;margin-top:8px}td{padding:4px 0;border-bottom:1px dashed #ddd;vertical-align:top}.totals{margin-top:8px}.line{display:flex;justify-content:space-between;margin:3px 0}.total{font-weight:700;font-size:14px;margin-top:6px}</style></head><body><h2>Virginia POS Receipt</h2><div class="muted">Order #${order.id}</div><div class="muted">Cashier: ${esc(order.cashier || "-")}</div><div class="muted">Date: ${esc(payment?.created_at || order.updated_at || order.created_at)}</div><div class="muted">Customer: ${esc(order.customer_name || "Guest")}</div><div class="muted">Phone: ${esc(order.customer_phone || "-")}</div><table><tbody>${rows}</tbody></table><div class="totals"><div class="line"><span>Subtotal</span><span>${money(order.subtotal_cents)}</span></div><div class="line"><span>Discount</span><span>${money(order.discount_cents)}</span></div><div class="line total"><span>Total</span><span>${money(order.total_cents)}</span></div><div class="line"><span>Cash Received</span><span>${money(payment?.received_cents)}</span></div><div class="line"><span>Change</span><span>${money(payment?.change_cents)}</span></div></div></body></html>`;
+  const itemRows = items.map((i) => {
+    const qty = Number(i.quantity || 0);
+    const lineName = `${qty} ${esc(i.item_name)}`;
+    const amount = money(i.line_total_cents);
+    return `<div class="line item-line"><span class="item-name">${lineName}</span><span class="item-amt">${amount}</span></div>`;
+  }).join("");
+  const fmtDate = (v) => {
+    const d = new Date(v);
+    if (!Number.isFinite(d.getTime())) return esc(String(v || "-"));
+    const date = d.toLocaleDateString(undefined, { day: "2-digit", month: "long", year: "numeric" });
+    const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return { date, time, full: `${date} ${time}` };
+  };
+  const dt = fmtDate(payment?.created_at || order.updated_at || order.created_at);
+  const subtotalCents = Number(order.subtotal_cents || 0);
+  const taxCents = Number(order.tax_cents || 0);
+  const totalCents = Number(order.total_cents || 0);
+  const barcodeValue = `${order.id}${String(order.created_at || "").replace(/\D/g, "").slice(-10)}`;
+  const logoPath = path.join(__dirname, "assets", "logo.png");
+  const logoHtml = (() => {
+    try {
+      if (!fs.existsSync(logoPath)) return "";
+      const b64 = fs.readFileSync(logoPath).toString("base64");
+      return `<div class="logo-wrap"><img class="logo" src="data:image/png;base64,${b64}" alt="Logo" /></div>`;
+    } catch (_) {
+      return "";
+    }
+  })();
+  return `<!doctype html><html><head><meta charset="UTF-8"/><style>body{margin:0;background:#ececec;font-family:"Courier New",monospace;color:#111}.receipt{width:300px;margin:0 auto;background:#fff;padding:14px 12px 18px;line-height:1.25}.center{text-align:center}.logo-wrap{text-align:center;margin:0 0 8px}.logo{display:block;margin:0 auto;max-width:80px;max-height:80px;object-fit:contain}.title{font-size:20px;font-weight:700;margin:2px 0}.sub{font-size:13px}.time{font-size:24px;font-weight:700;letter-spacing:1px;margin:3px 0 2px}.rule{border-top:2px dashed #888;margin:8px 0}.line{display:flex;justify-content:space-between;gap:8px;margin:2px 0}.item-line{margin:1px 0}.item-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.item-amt{min-width:84px;text-align:right}.totals{margin-top:8px}.total-row{font-size:33px;font-weight:800;letter-spacing:0.5px}.small{font-size:12px}.barcode{height:48px;margin:12px auto 8px;background:repeating-linear-gradient(90deg,#000 0,#000 2px,#fff 2px,#fff 4px);border:1px solid #000}.faint{color:#444}</style></head><body><div class="receipt">${logoHtml}<div class="center"><div class="title">Order Receipt</div><div class="sub">${esc(dt.date)}</div><div class="time">${esc(dt.time)}</div></div><div class="rule"></div><div class="center"><div class="sub">Virginia Pizza & Fast Food</div><div class="sub">Order #${order.id}</div><div class="sub">Customer: ${esc(order.customer_name || "Guest")}</div><div class="sub">Phone: ${esc(order.customer_phone || "-")}</div></div><div class="rule"></div><div class="center faint">Cashier: ${esc(order.cashier || "-")}</div><div class="rule"></div>${itemRows}<div class="totals"><div class="line"><span>SUBTOTAL</span><strong>${money(subtotalCents)}</strong></div><div class="line"><span>TAX</span><strong>${money(taxCents)}</strong></div><div class="line total-row"><span>TOTAL</span><span>${money(totalCents)}</span></div></div><div class="rule"></div><div class="small">Payment method: ${esc(payment?.method || "-")}</div><div class="small">Received: ${money(payment?.received_cents)}</div><div class="small">Change: ${money(payment?.change_cents)}</div><div class="small">Date/time: ${esc(dt.full)}</div><div class="small">Reference: ${esc(barcodeValue || "-")}</div><div class="barcode"></div><div class="center sub">Thank you<br>Have a nice day.</div></div></body></html>`;
 }
 
 async function buildReceipt(orderId) {
@@ -418,6 +498,253 @@ function registerIpc() {
   ipcMain.handle("cash:add-transaction", async (_, p) => { try { if (!["IN", "OUT"].includes(p.type)) return { ok: false, error: "Invalid transaction type." }; const n = Number(p.amountCents || 0); if (n <= 0) return { ok: false, error: "Amount must be positive." }; await ins("cash_transactions", { session_id: p.sessionId, transaction_type: p.type, amount_cents: n, reason: p.reason || "Manual cash movement", reference_type: "MANUAL", reference_id: null, user_id: p.userId || null, created_at: now() }); await audit(p.userId, "CASH_TRANSACTION_ADDED", { sessionId: p.sessionId, type: p.type, amount: n }); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("cash:close-session", async (_, p) => { try { const s = await get("cash_sessions", p.sessionId); if (!s || s.status !== "OPEN") return { ok: false, error: "Open session not found." }; const tx = await q("cash_transactions", (x) => x.eq("session_id", p.sessionId)); const totals = tx.reduce((a, r) => { if (r.transaction_type === "IN") a.in += Number(r.amount_cents || 0); if (r.transaction_type === "OUT") a.out += Number(r.amount_cents || 0); return a; }, { in: 0, out: 0 }); const expected = Number(s.opening_cents || 0) + totals.in - totals.out; const actual = Number(p.actualClosingCents || 0); const variance = actual - expected; await upd("cash_sessions", (x) => x.eq("id", p.sessionId), { closed_by_user_id: p.userId, closing_cents: actual, expected_closing_cents: expected, variance_cents: variance, denomination_json: p.denominationCounts ? JSON.stringify(p.denominationCounts) : null, closed_at: now(), status: "CLOSED" }); await audit(p.userId, "CASH_SESSION_CLOSED", { sessionId: p.sessionId, expected, actual, variance }); return { ok: true, expected, actual, variance }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
 
+  ipcMain.handle("employee:list", async (_, p = {}) => {
+    try {
+      if (!(await isAdmin(p.userId))) return { ok: false, error: "Only admin can access employee register." };
+      const includeInactive = !!p.includeInactive;
+      const employees = await q("employee_register", (x) => (includeInactive ? x : x.eq("active", 1)).order("full_name", { ascending: true }));
+      const ids = employees.map((e) => e.id);
+      const ledgerRows = ids.length ? await q("employee_ledger", (x) => x.in("employee_id", ids)) : [];
+      const grouped = new Map();
+      for (const row of ledgerRows) {
+        const bucket = grouped.get(row.employee_id) || [];
+        bucket.push(row);
+        grouped.set(row.employee_id, bucket);
+      }
+      return { ok: true, employees: summarizeEmployeeRows(employees, grouped) };
+    } catch (e) { return { ok: false, error: e.message || "Failed to list employees." }; }
+  });
+
+  ipcMain.handle("employee:create", async (_, p = {}) => {
+    try {
+      if (!(await isAdmin(p.userId))) return { ok: false, error: "Only admin can create employees." };
+      const fullName = String(p.fullName || "").trim();
+      if (!fullName) return { ok: false, error: "Employee name is required." };
+      const monthlySalaryCents = Math.max(0, Math.round(Number(p.monthlySalaryCents || 0)));
+      const row = await ins("employee_register", {
+        full_name: fullName,
+        phone: p.phone ? String(p.phone).trim() : null,
+        monthly_salary_cents: monthlySalaryCents,
+        notes: p.notes ? String(p.notes).trim() : null,
+        active: p.active === false ? 0 : 1,
+        created_at: now(),
+        updated_at: now()
+      });
+      await audit(p.userId, "EMPLOYEE_CREATED", { employeeId: row.id, fullName: row.full_name });
+      return { ok: true, employeeId: row.id };
+    } catch (e) { return { ok: false, error: e.message || "Failed to create employee." }; }
+  });
+
+  ipcMain.handle("employee:update", async (_, p = {}) => {
+    try {
+      if (!(await isAdmin(p.userId))) return { ok: false, error: "Only admin can update employees." };
+      const employeeId = Number(p.employeeId || 0);
+      if (!employeeId) return { ok: false, error: "Invalid employee id." };
+      const employee = await get("employee_register", employeeId);
+      if (!employee) return { ok: false, error: "Employee not found." };
+      const patch = { updated_at: now() };
+      if (p.fullName != null) {
+        const fullName = String(p.fullName).trim();
+        if (!fullName) return { ok: false, error: "Employee name is required." };
+        patch.full_name = fullName;
+      }
+      if (p.phone != null) patch.phone = p.phone ? String(p.phone).trim() : null;
+      if (p.monthlySalaryCents != null) {
+        const amount = Math.round(Number(p.monthlySalaryCents || 0));
+        if (!Number.isFinite(amount) || amount < 0) return { ok: false, error: "Invalid monthly salary." };
+        patch.monthly_salary_cents = amount;
+      }
+      if (p.notes != null) patch.notes = p.notes ? String(p.notes).trim() : null;
+      if (p.active != null) patch.active = p.active ? 1 : 0;
+      await upd("employee_register", (x) => x.eq("id", employeeId), patch);
+      await audit(p.userId, "EMPLOYEE_UPDATED", { employeeId });
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message || "Failed to update employee." }; }
+  });
+
+  ipcMain.handle("employee:add-ledger-entry", async (_, p = {}) => {
+    try {
+      if (!(await isAdmin(p.userId))) return { ok: false, error: "Only admin can post salary/credit entries." };
+      const employeeId = Number(p.employeeId || 0);
+      if (!employeeId) return { ok: false, error: "Invalid employee id." };
+      const employee = await get("employee_register", employeeId);
+      if (!employee) return { ok: false, error: "Employee not found." };
+      const currentMonth = monthKey(new Date());
+      const closure = await getSalaryClosure(employeeId, currentMonth);
+      if (closure) return { ok: false, error: `Salary month ${currentMonth} is already closed for this employee.` };
+      const entryType = String(p.entryType || "").toUpperCase();
+      if (!["SALARY", "CREDIT"].includes(entryType)) return { ok: false, error: "Invalid entry type." };
+      const amountCents = Math.round(Number(p.amountCents || 0));
+      if (!Number.isFinite(amountCents) || amountCents <= 0) return { ok: false, error: "Amount must be positive." };
+      const row = await ins("employee_ledger", {
+        employee_id: employeeId,
+        entry_type: entryType,
+        amount_cents: amountCents,
+        notes: p.notes ? String(p.notes).trim() : null,
+        created_by_user_id: p.userId || null,
+        created_at: now()
+      });
+      await audit(p.userId, "EMPLOYEE_LEDGER_ENTRY_ADDED", { employeeId, entryId: row.id, entryType, amountCents });
+      return { ok: true, entryId: row.id };
+    } catch (e) { return { ok: false, error: e.message || "Failed to add ledger entry." }; }
+  });
+
+  ipcMain.handle("employee:get-ledger", async (_, p = {}) => {
+    try {
+      if (!(await isAdmin(p.userId))) return { ok: false, error: "Only admin can view employee ledger." };
+      const employeeId = Number(p.employeeId || 0);
+      if (!employeeId) return { ok: false, error: "Invalid employee id." };
+      const employee = await get("employee_register", employeeId);
+      if (!employee) return { ok: false, error: "Employee not found." };
+      const rawEntries = await q("employee_ledger", (x) => x.eq("employee_id", employeeId).order("id", { ascending: false }).limit(5000));
+      const fromMs = p.fromDate ? new Date(`${String(p.fromDate).trim()}T00:00:00`).getTime() : null;
+      const toMs = p.toDate ? new Date(`${String(p.toDate).trim()}T23:59:59.999`).getTime() : null;
+      if (fromMs != null && !Number.isFinite(fromMs)) return { ok: false, error: "Invalid from date." };
+      if (toMs != null && !Number.isFinite(toMs)) return { ok: false, error: "Invalid to date." };
+      const entries = rawEntries.filter((e) => {
+        const t = new Date(e.created_at).getTime();
+        if (!Number.isFinite(t)) return false;
+        if (fromMs != null && t < fromMs) return false;
+        if (toMs != null && t > toMs) return false;
+        return true;
+      });
+      const users = await q("users", (x) => x.limit(1000));
+      const userById = new Map(users.map((u) => [u.id, u.username]));
+      const enriched = entries.map((e) => ({ ...e, created_by_username: userById.get(e.created_by_user_id) || null }));
+      const salaryAdjustmentsCents = enriched
+        .filter((r) => r.entry_type === "SALARY")
+        .reduce((a, r) => a + Number(r.amount_cents || 0), 0);
+      const creditCents = enriched
+        .filter((r) => r.entry_type === "CREDIT")
+        .reduce((a, r) => a + Number(r.amount_cents || 0), 0);
+      const baseSalaryCents = Number(employee.monthly_salary_cents || 0);
+      const totalSalaryCents = baseSalaryCents + salaryAdjustmentsCents;
+      const currentMonth = monthKey(new Date());
+      const closure = await getSalaryClosure(employeeId, currentMonth);
+      return {
+        ok: true,
+        employee,
+        currentMonth,
+        currentMonthClosed: !!closure,
+        currentMonthClosure: closure,
+        summary: {
+          baseSalaryCents,
+          salaryAdjustmentsCents,
+          totalSalaryCents,
+          salaryCents: totalSalaryCents,
+          creditCents,
+          netPayableCents: totalSalaryCents - creditCents
+        },
+        entries: enriched
+      };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load employee ledger." }; }
+  });
+
+  ipcMain.handle("employee:export-ledger-csv", async (_, p = {}) => {
+    try {
+      if (!(await isAdmin(p.userId))) return { ok: false, error: "Only admin can export employee ledger." };
+      const employeeId = Number(p.employeeId || 0);
+      if (!employeeId) return { ok: false, error: "Invalid employee id." };
+      const employee = await get("employee_register", employeeId);
+      if (!employee) return { ok: false, error: "Employee not found." };
+      const fromMs = p.fromDate ? new Date(`${String(p.fromDate).trim()}T00:00:00`).getTime() : null;
+      const toMs = p.toDate ? new Date(`${String(p.toDate).trim()}T23:59:59.999`).getTime() : null;
+      if (fromMs != null && !Number.isFinite(fromMs)) return { ok: false, error: "Invalid from date." };
+      if (toMs != null && !Number.isFinite(toMs)) return { ok: false, error: "Invalid to date." };
+      const rows = await q("employee_ledger", (x) => x.eq("employee_id", employeeId).order("id", { ascending: false }).limit(5000));
+      const users = await q("users", (x) => x.limit(1000));
+      const userById = new Map(users.map((u) => [u.id, u.username]));
+      const filtered = rows.filter((e) => {
+        const t = new Date(e.created_at).getTime();
+        if (!Number.isFinite(t)) return false;
+        if (fromMs != null && t < fromMs) return false;
+        if (toMs != null && t > toMs) return false;
+        return true;
+      });
+      const safeName = String(employee.full_name || "employee").replace(/[^\w.-]+/g, "-");
+      const { canceled, filePath } = await dialog.showSaveDialog({
+        title: "Export Employee Ledger CSV",
+        defaultPath: `${safeName}-ledger.csv`,
+        filters: [{ name: "CSV", extensions: ["csv"] }]
+      });
+      if (canceled || !filePath) return { ok: false, error: "Export canceled." };
+      const escCsv = (v) => `"${String(v ?? "").replace(/"/g, "\"\"")}"`;
+      const lines = ["entry_id,created_at,entry_type,amount,created_by,notes"];
+      for (const row of filtered) {
+        lines.push([
+          row.id,
+          escCsv(row.created_at),
+          escCsv(row.entry_type),
+          (Number(row.amount_cents || 0) / 100).toFixed(2),
+          escCsv(userById.get(row.created_by_user_id) || ""),
+          escCsv(row.notes || "")
+        ].join(","));
+      }
+      fs.writeFileSync(filePath, lines.join("\n"), "utf8");
+      return { ok: true, filePath, count: filtered.length };
+    } catch (e) { return { ok: false, error: e.message || "Failed to export employee ledger." }; }
+  });
+
+  ipcMain.handle("employee:delete-ledger-entry", async (_, p = {}) => {
+    try {
+      if (!(await isAdmin(p.userId))) return { ok: false, error: "Only admin can delete employee ledger entries." };
+      const entryId = Number(p.entryId || 0);
+      if (!entryId) return { ok: false, error: "Invalid ledger entry id." };
+      const entry = await get("employee_ledger", entryId);
+      if (!entry) return { ok: false, error: "Ledger entry not found." };
+      if (entry.entry_type !== "CREDIT") return { ok: false, error: "Only credit entries can be deleted." };
+      const entryMonth = monthKey(entry.created_at);
+      const closure = await getSalaryClosure(entry.employee_id, entryMonth);
+      if (closure) return { ok: false, error: `Cannot delete credit in closed month ${entryMonth}.` };
+      await del("employee_ledger", (x) => x.eq("id", entryId));
+      await audit(p.userId || null, "EMPLOYEE_LEDGER_ENTRY_DELETED", {
+        entryId,
+        employeeId: entry.employee_id,
+        entryType: entry.entry_type,
+        amountCents: Number(entry.amount_cents || 0)
+      });
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message || "Failed to delete employee ledger entry." }; }
+  });
+
+  ipcMain.handle("employee:close-current-month", async (_, p = {}) => {
+    try {
+      if (!(await isAdmin(p.userId))) return { ok: false, error: "Only admin can close salary month." };
+      const employeeId = Number(p.employeeId || 0);
+      if (!employeeId) return { ok: false, error: "Invalid employee id." };
+      const employee = await get("employee_register", employeeId);
+      if (!employee) return { ok: false, error: "Employee not found." };
+      const mKey = monthKey(new Date());
+      const existing = await getSalaryClosure(employeeId, mKey);
+      if (existing) return { ok: false, error: `Salary month ${mKey} is already closed for this employee.` };
+      const bounds = monthBounds(mKey);
+      const rows = await q("employee_ledger", (x) => x.eq("employee_id", employeeId).order("id", { ascending: false }).limit(5000));
+      const monthRows = rows.filter((r) => {
+        const t = new Date(r.created_at).getTime();
+        return Number.isFinite(t) && t >= bounds.fromMs && t <= bounds.toMs;
+      });
+      const salaryAdjustmentsCents = monthRows.filter((r) => r.entry_type === "SALARY").reduce((a, r) => a + Number(r.amount_cents || 0), 0);
+      const creditCents = monthRows.filter((r) => r.entry_type === "CREDIT").reduce((a, r) => a + Number(r.amount_cents || 0), 0);
+      const baseSalaryCents = Number(employee.monthly_salary_cents || 0);
+      const totalSalaryCents = baseSalaryCents + salaryAdjustmentsCents;
+      const netPayableCents = totalSalaryCents - creditCents;
+      const closure = await ins("employee_salary_closures", {
+        employee_id: employeeId,
+        month_key: mKey,
+        base_salary_cents: baseSalaryCents,
+        salary_adjustments_cents: salaryAdjustmentsCents,
+        total_salary_cents: totalSalaryCents,
+        credit_cents: creditCents,
+        net_payable_cents: netPayableCents,
+        closed_by_user_id: p.userId || null,
+        notes: p.notes ? String(p.notes).trim() : null,
+        closed_at: now()
+      });
+      await audit(p.userId || null, "EMPLOYEE_SALARY_MONTH_CLOSED", { employeeId, monthKey: mKey, closureId: closure.id, netPayableCents });
+      return { ok: true, monthKey: mKey, closure };
+    } catch (e) { return { ok: false, error: e.message || "Failed to close salary month." }; }
+  });
+
   ipcMain.handle("kds:list", async (_, p = {}) => { try { const allowed = ["QUEUED", "PREPARING", "READY", "SERVED", "CANCELLED"]; let st = Array.isArray(p.statuses) ? p.statuses.map((s) => String(s).toUpperCase()).filter((s) => allowed.includes(s)) : ["QUEUED", "PREPARING", "READY"]; if (!st.length) st = ["QUEUED", "PREPARING", "READY"]; const t = await q("kitchen_tickets", (x) => x.in("status", st).order("id", { ascending: true })); const orderIds = t.map((v) => v.order_id); const os = orderIds.length ? await q("orders", (x) => x.in("id", orderIds)) : []; const ob = new Map(os.map((o) => [o.id, o])); const tids = t.map((v) => v.id); const it = tids.length ? await q("kitchen_ticket_items", (x) => x.in("ticket_id", tids).order("id", { ascending: true })) : []; const im = new Map(); for (const r of it) { const a = im.get(r.ticket_id) || []; a.push(r); im.set(r.ticket_id, a); } return { ok: true, tickets: t.map((r) => ({ ...r, customer_name: ob.get(r.order_id)?.customer_name || null, customer_phone: ob.get(r.order_id)?.customer_phone || null, items: im.get(r.id) || [] })) }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("kds:update-status", async (_, p) => { try { const st = String(p.status || "").toUpperCase(); if (!["QUEUED", "PREPARING", "READY", "SERVED", "CANCELLED"].includes(st)) return { ok: false, error: "Invalid ticket status." }; const t = await get("kitchen_tickets", p.ticketId); if (!t) return { ok: false, error: "Ticket not found." }; const patch = { status: st, bumped_by_user_id: p.userId || null, updated_at: now() }; if (st === "PREPARING" && !t.started_at) patch.started_at = now(); if (st === "READY") patch.ready_at = now(); if (st === "SERVED") patch.served_at = now(); await upd("kitchen_tickets", (x) => x.eq("id", p.ticketId), patch); await audit(p.userId || null, "KDS_TICKET_STATUS_UPDATED", { ticketId: p.ticketId, orderId: t.order_id, status: st }); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("kds:bump", async (_, p) => { try { const t = await get("kitchen_tickets", p.ticketId); if (!t) return { ok: false, error: "Ticket not found." }; const n = ({ QUEUED: "PREPARING", PREPARING: "READY", READY: "SERVED", SERVED: "SERVED", CANCELLED: "CANCELLED" })[t.status] || t.status; if (n === t.status) return { ok: true, status: n }; const patch = { status: n, bumped_by_user_id: p.userId || null, updated_at: now() }; if (n === "PREPARING" && !t.started_at) patch.started_at = now(); if (n === "READY") patch.ready_at = now(); if (n === "SERVED") patch.served_at = now(); await upd("kitchen_tickets", (x) => x.eq("id", p.ticketId), patch); await audit(p.userId || null, "KDS_TICKET_BUMPED", { ticketId: p.ticketId, orderId: t.order_id, from: t.status, to: n }); return { ok: true, status: n }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
@@ -487,6 +814,19 @@ function createMainWindow() {
   win.loadFile(path.join(__dirname, "renderer", "index.html"));
 }
 
+function supabaseConnectivityHint(url, error) {
+  const host = (() => {
+    try { return new URL(url).hostname; } catch (_) { return null; }
+  })();
+  const msg = String(error?.message || error || "");
+  if (/fetch failed/i.test(msg)) {
+    return host
+      ? `Failed to reach Supabase host '${host}'. Verify SUPABASE_URL/SUPABASE_PROJECT_ID and network access.`
+      : "Failed to reach Supabase host. Verify SUPABASE_URL/SUPABASE_PROJECT_ID and network access.";
+  }
+  return null;
+}
+
 app.whenReady().then(async () => {
   fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
   fs.mkdirSync(DAILY_BACKUPS_DIR, { recursive: true });
@@ -495,9 +835,24 @@ app.whenReady().then(async () => {
   const url = u || (pid ? `https://${pid}.supabase.co` : "");
   const key = String(process.env.SUPABASE_ANON_KEY || "").trim();
   if (!url || !key) { console.error("Missing Supabase credentials."); app.quit(); return; }
+  try {
+    const host = new URL(url).hostname;
+    await dns.lookup(host);
+  } catch (e) {
+    console.error("Supabase host DNS lookup failed:", e.message || e);
+    console.error("Check SUPABASE_URL/SUPABASE_PROJECT_ID in .env. The configured host does not resolve.");
+    app.quit();
+    return;
+  }
   sb = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } });
   const ping = await sb.from("roles").select("id", { head: true, count: "exact" });
-  if (ping.error) { console.error("Supabase connection failed:", ping.error.message); app.quit(); return; }
+  if (ping.error) {
+    console.error("Supabase connection failed:", ping.error.message);
+    const hint = supabaseConnectivityHint(url, ping.error);
+    if (hint) console.error(hint);
+    app.quit();
+    return;
+  }
   sbState.enabled = true; sbState.url = url; sbState.lastCheckAt = now(); sbState.lastSyncAt = now(); sbState.lastSyncError = null;
   await ensureDailyBackup();
   registerIpc();
