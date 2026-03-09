@@ -3,18 +3,241 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const dns = require("dns").promises;
-require("dotenv").config();
+const dotenv = require("dotenv");
 const { createClient } = require("@supabase/supabase-js");
 
-const RECEIPTS_DIR = path.join(__dirname, "backup", "receipts");
-const DAILY_BACKUPS_DIR = path.join(__dirname, "backup", "daily_backups");
+dotenv.config();
+
+function loadEnvFromKnownPaths() {
+  const candidates = Array.from(new Set([
+    path.join(process.cwd(), ".env"),
+    process.resourcesPath ? path.join(process.resourcesPath, ".env") : null,
+    process.resourcesPath ? path.join(process.resourcesPath, "app.asar.unpacked", ".env") : null,
+    path.join(app.getPath("userData"), ".env"),
+    path.join(__dirname, ".env")
+  ].filter(Boolean)));
+  for (const fp of candidates) {
+    try {
+      if (!fs.existsSync(fp)) continue;
+      dotenv.config({ path: fp, override: false });
+    } catch (_) {}
+  }
+}
+
+const STORAGE_BASE_DIR = app.isPackaged ? app.getPath("userData") : __dirname;
+const RECEIPTS_DIR = path.join(STORAGE_BASE_DIR, "backup", "receipts");
+const DAILY_BACKUPS_DIR = path.join(STORAGE_BASE_DIR, "backup", "daily_backups");
+const DATA_SOURCE = String(process.env.POS_DATA_SOURCE || "local").trim().toLowerCase();
+const LOCAL_DB_PATH = path.join(STORAGE_BASE_DIR, "local-db.json");
 let sb = null;
-const sbState = { enabled: false, url: null, lastCheckAt: null, lastSyncAt: null, lastSyncError: null, dataSource: "supabase" };
+const sbState = { enabled: false, url: null, lastCheckAt: null, lastSyncAt: null, lastSyncError: null, dataSource: DATA_SOURCE === "local" ? "local" : "supabase" };
 const now = () => new Date().toISOString();
 const money = (c) => new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", currencyDisplay: "narrowSymbol", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(c || 0) / 100);
 const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;");
 const hashPin = (pin) => crypto.createHash("sha256").update(String(pin)).digest("hex");
 const schemaCompat = { ordersHasManualDiscountCents: true };
+const ALL_TABLES = [
+  "roles",
+  "users",
+  "menu_items",
+  "ingredients",
+  "promotions",
+  "orders",
+  "recipes",
+  "order_items",
+  "payments",
+  "kitchen_tickets",
+  "kitchen_ticket_items",
+  "inventory_movements",
+  "purchase_orders",
+  "purchase_order_items",
+  "cash_sessions",
+  "cash_transactions",
+  "audit_logs",
+  "employee_register",
+  "employee_ledger",
+  "employee_salary_closures"
+];
+
+function clone(v) { return JSON.parse(JSON.stringify(v)); }
+
+class LocalQuery {
+  constructor(db, table) {
+    this.db = db;
+    this.table = table;
+    this.mode = "select";
+    this.filters = [];
+    this.sorters = [];
+    this._limit = null;
+    this._range = null;
+    this._single = false;
+    this._head = false;
+    this._countExact = false;
+    this._insertRows = [];
+    this._updatePatch = null;
+    this._returning = true;
+  }
+  select(_cols = "*", opts = {}) {
+    if (this.mode === "delete") return this;
+    if (this.mode === "select") {
+      this._head = !!opts.head;
+      this._countExact = opts.count === "exact";
+    } else {
+      this._returning = true;
+    }
+    return this;
+  }
+  insert(payload) {
+    this.mode = "insert";
+    this._insertRows = Array.isArray(payload) ? payload : [payload];
+    this._returning = false;
+    return this;
+  }
+  update(patch) {
+    this.mode = "update";
+    this._updatePatch = patch || {};
+    this._returning = false;
+    return this;
+  }
+  delete() {
+    this.mode = "delete";
+    this._returning = false;
+    return this;
+  }
+  eq(field, value) { this.filters.push((r) => r?.[field] === value); return this; }
+  neq(field, value) { this.filters.push((r) => r?.[field] !== value); return this; }
+  in(field, values) { const set = new Set(values || []); this.filters.push((r) => set.has(r?.[field])); return this; }
+  is(field, value) { this.filters.push((r) => r?.[field] === value); return this; }
+  ilike(field, pattern) {
+    const raw = String(pattern || "");
+    const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*");
+    const re = new RegExp(`^${escaped}$`, "i");
+    this.filters.push((r) => re.test(String(r?.[field] || "")));
+    return this;
+  }
+  not(field, op, value) {
+    if (String(op || "").toLowerCase() === "is") this.filters.push((r) => r?.[field] !== value);
+    return this;
+  }
+  order(field, opts = {}) {
+    const asc = opts.ascending !== false;
+    this.sorters.push((a, b) => {
+      const av = a?.[field]; const bv = b?.[field];
+      if (av === bv) return 0;
+      if (av == null) return asc ? -1 : 1;
+      if (bv == null) return asc ? 1 : -1;
+      return av > bv ? (asc ? 1 : -1) : (asc ? -1 : 1);
+    });
+    return this;
+  }
+  limit(n) { this._limit = Math.max(0, Number(n || 0)); return this; }
+  range(from, to) { this._range = { from: Number(from || 0), to: Number(to || 0) }; return this; }
+  single() { this._single = true; return this; }
+  _applySelect(rows) {
+    let out = rows.slice();
+    for (const f of this.filters) out = out.filter(f);
+    for (const s of this.sorters) out.sort(s);
+    const count = out.length;
+    if (this._range) out = out.slice(this._range.from, this._range.to + 1);
+    if (this._limit != null) out = out.slice(0, this._limit);
+    return { rows: out, count };
+  }
+  _execSync() {
+    const tableRows = this.db.data[this.table] || [];
+    if (this.mode === "insert") {
+      const inserted = [];
+      for (const raw of this._insertRows) {
+        const row = clone(raw || {});
+        if (row.id == null) {
+          this.db.seq[this.table] = (this.db.seq[this.table] || 0) + 1;
+          row.id = this.db.seq[this.table];
+        } else {
+          this.db.seq[this.table] = Math.max(Number(this.db.seq[this.table] || 0), Number(row.id || 0));
+        }
+        this.db.data[this.table].push(row);
+        inserted.push(clone(row));
+      }
+      this.db.save();
+      let data = this._returning ? inserted : null;
+      if (this._single) data = Array.isArray(data) ? data[0] || null : null;
+      return { data, error: null };
+    }
+    if (this.mode === "update") {
+      const { rows: matched } = this._applySelect(tableRows);
+      const ids = new Set(matched.map((r) => r.id));
+      const updated = [];
+      for (const row of this.db.data[this.table]) {
+        if (!ids.has(row.id)) continue;
+        Object.assign(row, clone(this._updatePatch || {}));
+        updated.push(clone(row));
+      }
+      this.db.save();
+      let data = this._returning ? updated : null;
+      if (this._single) data = Array.isArray(data) ? data[0] || null : null;
+      return { data, error: null };
+    }
+    if (this.mode === "delete") {
+      const { rows: matched } = this._applySelect(tableRows);
+      const ids = new Set(matched.map((r) => r.id));
+      this.db.data[this.table] = this.db.data[this.table].filter((r) => !ids.has(r.id));
+      this.db.save();
+      return { data: null, error: null };
+    }
+    const { rows, count } = this._applySelect(tableRows);
+    let data = this._head ? null : clone(rows);
+    if (this._single) data = Array.isArray(data) ? data[0] || null : null;
+    const out = { data, error: null };
+    if (this._countExact) out.count = count;
+    return out;
+  }
+  then(resolve, reject) {
+    try { resolve(this._execSync()); } catch (e) { reject(e); }
+  }
+}
+
+class LocalDb {
+  constructor(filePath) {
+    this.filePath = filePath;
+    this.data = {};
+    this.seq = {};
+    this._load();
+  }
+  _load() {
+    if (fs.existsSync(this.filePath)) {
+      const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
+      this.data = parsed?.data && typeof parsed.data === "object" ? parsed.data : {};
+      this.seq = parsed?.seq && typeof parsed.seq === "object" ? parsed.seq : {};
+    }
+    for (const t of ALL_TABLES) {
+      if (!Array.isArray(this.data[t])) this.data[t] = [];
+      if (!Number.isFinite(this.seq[t])) {
+        this.seq[t] = this.data[t].reduce((m, r) => Math.max(m, Number(r?.id || 0)), 0);
+      }
+    }
+    if (!this.data.roles.length && !this.data.users.length) {
+      const roles = ["ADMIN", "MANAGER", "CASHIER"];
+      for (const r of roles) this._insertRaw("roles", { name: r, permissions_json: null, created_at: now() });
+      const roleByName = new Map(this.data.roles.map((r) => [r.name, r.id]));
+      this._insertRaw("users", { username: "admin", pin_hash: hashPin("1234"), role_id: roleByName.get("ADMIN"), active: 1, created_at: now() });
+      this._insertRaw("users", { username: "manager", pin_hash: hashPin("2222"), role_id: roleByName.get("MANAGER"), active: 1, created_at: now() });
+      this._insertRaw("users", { username: "cashier", pin_hash: hashPin("9999"), role_id: roleByName.get("CASHIER"), active: 1, created_at: now() });
+      this.save();
+    }
+  }
+  _insertRaw(table, row) {
+    this.seq[table] = (this.seq[table] || 0) + 1;
+    this.data[table].push({ ...clone(row), id: this.seq[table] });
+  }
+  save() {
+    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+    fs.writeFileSync(this.filePath, JSON.stringify({ version: 1, data: this.data, seq: this.seq }, null, 2), "utf8");
+  }
+  from(table) {
+    if (!this.data[table]) this.data[table] = [];
+    if (!Number.isFinite(this.seq[table])) this.seq[table] = 0;
+    return new LocalQuery(this, table);
+  }
+}
 
 function isMissingManualDiscountColumnError(error) {
   return /manual_discount_cents/i.test(String(error?.message || error || ""));
@@ -828,36 +1051,62 @@ function supabaseConnectivityHint(url, error) {
 }
 
 app.whenReady().then(async () => {
+  loadEnvFromKnownPaths();
   fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
   fs.mkdirSync(DAILY_BACKUPS_DIR, { recursive: true });
-  const u = String(process.env.SUPABASE_URL || "").trim();
-  const pid = String(process.env.SUPABASE_PROJECT_ID || "").trim();
-  const url = u || (pid ? `https://${pid}.supabase.co` : "");
-  const key = String(process.env.SUPABASE_ANON_KEY || "").trim();
-  if (!url || !key) { console.error("Missing Supabase credentials."); app.quit(); return; }
-  try {
-    const host = new URL(url).hostname;
-    await dns.lookup(host);
-  } catch (e) {
-    console.error("Supabase host DNS lookup failed:", e.message || e);
-    console.error("Check SUPABASE_URL/SUPABASE_PROJECT_ID in .env. The configured host does not resolve.");
-    app.quit();
-    return;
+  if (DATA_SOURCE === "local") {
+    sb = new LocalDb(LOCAL_DB_PATH);
+    sbState.enabled = true;
+    sbState.url = LOCAL_DB_PATH;
+    sbState.lastCheckAt = now();
+    sbState.lastSyncAt = now();
+    sbState.lastSyncError = null;
+  } else {
+    const u = String(process.env.SUPABASE_URL || "").trim();
+    const pid = String(process.env.SUPABASE_PROJECT_ID || "").trim();
+    const url = u || (pid ? `https://${pid}.supabase.co` : "");
+    const key = String(process.env.SUPABASE_ANON_KEY || "").trim();
+    if (!url || !key) {
+      const msg = `Missing Supabase credentials. Add .env in ${app.getPath("userData")} or set SUPABASE_URL/SUPABASE_PROJECT_ID and SUPABASE_ANON_KEY.`;
+      console.error(msg);
+      dialog.showErrorBox("Startup Error", msg);
+      app.quit();
+      return;
+    }
+    try {
+      const host = new URL(url).hostname;
+      await dns.lookup(host);
+    } catch (e) {
+      const msg = `Supabase host DNS lookup failed: ${e.message || e}\nCheck SUPABASE_URL/SUPABASE_PROJECT_ID in .env.`;
+      console.error(msg);
+      dialog.showErrorBox("Startup Error", msg);
+      app.quit();
+      return;
+    }
+    sb = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } });
+    const ping = await sb.from("roles").select("id", { head: true, count: "exact" });
+    if (ping.error) {
+      console.error("Supabase connection failed:", ping.error.message);
+      const hint = supabaseConnectivityHint(url, ping.error);
+      if (hint) console.error(hint);
+      app.quit();
+      return;
+    }
+    sbState.enabled = true;
+    sbState.url = url;
+    sbState.lastCheckAt = now();
+    sbState.lastSyncAt = now();
+    sbState.lastSyncError = null;
   }
-  sb = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } });
-  const ping = await sb.from("roles").select("id", { head: true, count: "exact" });
-  if (ping.error) {
-    console.error("Supabase connection failed:", ping.error.message);
-    const hint = supabaseConnectivityHint(url, ping.error);
-    if (hint) console.error(hint);
-    app.quit();
-    return;
-  }
-  sbState.enabled = true; sbState.url = url; sbState.lastCheckAt = now(); sbState.lastSyncAt = now(); sbState.lastSyncError = null;
   await ensureDailyBackup();
   registerIpc();
   createMainWindow();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); });
+}).catch((e) => {
+  const msg = `Unexpected startup error: ${e.message || e}`;
+  console.error(msg);
+  try { dialog.showErrorBox("Startup Error", msg); } catch (_) {}
+  app.quit();
 });
 
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

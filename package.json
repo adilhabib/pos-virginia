@@ -8,7 +8,9 @@
     "build": "electron-builder --dir",
     "dist": "electron-builder",
     "lint": "echo \"No linter configured\"",
-    "supabase:clear": "node scripts/run-with-electron-node.js scripts/supabase-clear.js"
+    "supabase:clear": "node scripts/run-with-electron-node.js scripts/supabase-clear.js",
+    "local:reset": "node scripts/local-reset.js",
+    "start:clean-local": "npm run local:reset && npm start"
   },
   "keywords": [
     "pos",

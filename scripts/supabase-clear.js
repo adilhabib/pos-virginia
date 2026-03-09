@@ -2,6 +2,9 @@ require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 
 const DELETE_ORDER = [
+  "employee_salary_closures",
+  "employee_ledger",
+  "employee_register",
   "kitchen_ticket_items",
   "kitchen_tickets",
   "payments",
@@ -14,9 +17,7 @@ const DELETE_ORDER = [
   "ingredients",
   "menu_items",
   "promotions",
-  "audit_logs",
-  "users",
-  "roles"
+  "audit_logs"
 ];
 
 function getSupabaseClient() {
@@ -57,4 +58,3 @@ run().catch((error) => {
   console.error("Supabase clear failed:", error.message || error);
   process.exit(1);
 });
-
