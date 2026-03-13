@@ -47,20 +47,212 @@
         "id": 3
       }
     ],
-    "menu_items": [],
+    "menu_items": [
+      {
+        "name": "Fajita Small",
+        "category": "Pizza",
+        "price_cents": 60000,
+        "active": 0,
+        "id": 1
+      },
+      {
+        "name": "Fajita",
+        "category": "Pizza",
+        "size": "Small",
+        "price_cents": 60000,
+        "active": 1,
+        "id": 2
+      },
+      {
+        "name": "Fajita",
+        "category": "Pizza",
+        "size": "Medium",
+        "price_cents": 95000,
+        "active": 1,
+        "id": 3
+      },
+      {
+        "name": "Fajita",
+        "category": "Pizza",
+        "size": "Large",
+        "price_cents": 125000,
+        "active": 1,
+        "id": 4
+      },
+      {
+        "name": "Tikka",
+        "category": "Pizza",
+        "size": "Small",
+        "price_cents": 60000,
+        "active": 1,
+        "id": 5
+      },
+      {
+        "name": "Chicken Burger",
+        "category": "Burger",
+        "size": null,
+        "price_cents": 25000,
+        "active": 1,
+        "id": 6
+      },
+      {
+        "name": "Fajita Extra Large",
+        "category": "Pizza",
+        "size": "Extra Large",
+        "price_cents": 165000,
+        "active": 1,
+        "id": 7
+      },
+      {
+        "name": "Zinger",
+        "category": "Burger",
+        "size": "Small",
+        "price_cents": 28000,
+        "active": 0,
+        "id": 8
+      }
+    ],
     "ingredients": [],
     "promotions": [],
-    "orders": [],
+    "orders": [
+      {
+        "status": "CANCELLED",
+        "subtotal_cents": 0,
+        "manual_discount_cents": 0,
+        "promo_discount_cents": 0,
+        "promo_code": null,
+        "promo_id": null,
+        "discount_cents": 0,
+        "tax_cents": 0,
+        "total_cents": 0,
+        "cashier_user_id": 3,
+        "notes": null,
+        "created_at": "2026-03-13T08:17:10.437Z",
+        "updated_at": "2026-03-13T09:25:47.667Z",
+        "id": 1
+      },
+      {
+        "status": "CANCELLED",
+        "subtotal_cents": 0,
+        "manual_discount_cents": 0,
+        "promo_discount_cents": 0,
+        "promo_code": null,
+        "promo_id": null,
+        "discount_cents": 0,
+        "tax_cents": 0,
+        "total_cents": 0,
+        "cashier_user_id": 1,
+        "notes": null,
+        "created_at": "2026-03-13T09:23:34.659Z",
+        "updated_at": "2026-03-13T09:23:41.683Z",
+        "id": 2
+      },
+      {
+        "status": "PAID",
+        "subtotal_cents": 155000,
+        "manual_discount_cents": 0,
+        "promo_discount_cents": 0,
+        "promo_code": null,
+        "promo_id": null,
+        "discount_cents": 0,
+        "tax_cents": 0,
+        "total_cents": 155000,
+        "cashier_user_id": 3,
+        "notes": null,
+        "created_at": "2026-03-13T09:25:43.572Z",
+        "updated_at": "2026-03-13T09:52:21.529Z",
+        "id": 3,
+        "paid_at": "2026-03-13T09:52:21.529Z"
+      },
+      {
+        "status": "CANCELLED",
+        "subtotal_cents": 25000,
+        "manual_discount_cents": 0,
+        "promo_discount_cents": 0,
+        "promo_code": null,
+        "promo_id": null,
+        "discount_cents": 0,
+        "tax_cents": 0,
+        "total_cents": 25000,
+        "cashier_user_id": 3,
+        "notes": null,
+        "created_at": "2026-03-13T09:51:57.672Z",
+        "updated_at": "2026-03-13T09:52:01.471Z",
+        "id": 4
+      }
+    ],
     "recipes": [],
-    "order_items": [],
-    "payments": [],
-    "kitchen_tickets": [],
-    "kitchen_ticket_items": [],
+    "order_items": [
+      {
+        "order_id": 3,
+        "menu_item_id": 2,
+        "quantity": 1,
+        "unit_price_cents": 60000,
+        "line_total_cents": 60000,
+        "modifiers_json": null,
+        "id": 5
+      },
+      {
+        "order_id": 3,
+        "menu_item_id": 3,
+        "quantity": 1,
+        "unit_price_cents": 95000,
+        "line_total_cents": 95000,
+        "modifiers_json": null,
+        "id": 6
+      },
+      {
+        "order_id": 4,
+        "menu_item_id": 6,
+        "quantity": 1,
+        "unit_price_cents": 25000,
+        "line_total_cents": 25000,
+        "modifiers_json": null,
+        "id": 7
+      }
+    ],
+    "payments": [
+      {
+        "order_id": 3,
+        "method": "CASH",
+        "amount_cents": 155000,
+        "received_cents": 155000,
+        "change_cents": 0,
+        "created_at": "2026-03-13T09:52:21.528Z",
+        "id": 1
+      }
+    ],
     "inventory_movements": [],
     "purchase_orders": [],
     "purchase_order_items": [],
-    "cash_sessions": [],
-    "cash_transactions": [],
+    "cash_sessions": [
+      {
+        "opened_by_user_id": 3,
+        "opening_cents": 100,
+        "opened_at": "2026-03-13T08:07:48.442Z",
+        "status": "CLOSED",
+        "id": 1,
+        "closed_by_user_id": 3,
+        "closing_cents": 155100,
+        "expected_closing_cents": 155100,
+        "variance_cents": 0,
+        "denomination_json": "{\"1\":\"1\",\"2\":\"\",\"5\":\"\",\"10\":\"\",\"20\":\"\",\"50\":\"1\",\"100\":\"\",\"500\":\"1\",\"1000\":\"1\",\"5000\":\"\"}",
+        "closed_at": "2026-03-13T09:52:42.408Z"
+      }
+    ],
+    "cash_transactions": [
+      {
+        "session_id": 1,
+        "transaction_type": "IN",
+        "amount_cents": 155000,
+        "reason": "Order Payment",
+        "reference_type": "ORDER",
+        "reference_id": "3",
+        "user_id": 3,
+        "created_at": "2026-03-13T09:52:21.529Z",
+        "id": 1
+      }
+    ],
     "audit_logs": [
       {
         "user_id": null,
@@ -68,6 +260,272 @@
         "payload_json": "{\"mode\":\"auto\",\"filePath\":\"G:\\\\flet\\\\New folder\\\\pos-virginia\\\\backup\\\\daily_backups\\\\pos-backup-auto-2026-03-09T11-24-47-883Z.json\"}",
         "created_at": "2026-03-09T11:24:47.884Z",
         "id": 1
+      },
+      {
+        "user_id": null,
+        "action": "BACKUP_CREATED",
+        "payload_json": "{\"mode\":\"auto\",\"filePath\":\"G:\\\\flet\\\\New folder\\\\pos-virginia\\\\backup\\\\daily_backups\\\\pos-backup-auto-2026-03-13T08-07-31-356Z.json\"}",
+        "created_at": "2026-03-13T08:07:31.405Z",
+        "id": 2
+      },
+      {
+        "user_id": 3,
+        "action": "LOGIN_SUCCESS",
+        "payload_json": "{\"username\":\"cashier\"}",
+        "created_at": "2026-03-13T08:07:42.609Z",
+        "id": 3
+      },
+      {
+        "user_id": 3,
+        "action": "CASH_SESSION_OPENED",
+        "payload_json": "{\"sessionId\":1}",
+        "created_at": "2026-03-13T08:07:48.443Z",
+        "id": 4
+      },
+      {
+        "user_id": 1,
+        "action": "LOGIN_SUCCESS",
+        "payload_json": "{\"username\":\"admin\"}",
+        "created_at": "2026-03-13T08:08:03.149Z",
+        "id": 5
+      },
+      {
+        "user_id": 1,
+        "action": "MENU_ITEM_CREATED",
+        "payload_json": "{\"menuItemId\":1}",
+        "created_at": "2026-03-13T08:08:22.814Z",
+        "id": 6
+      },
+      {
+        "user_id": 3,
+        "action": "LOGIN_SUCCESS",
+        "payload_json": "{\"username\":\"cashier\"}",
+        "created_at": "2026-03-13T08:16:56.797Z",
+        "id": 7
+      },
+      {
+        "user_id": 3,
+        "action": "LOGIN_SUCCESS",
+        "payload_json": "{\"username\":\"cashier\"}",
+        "created_at": "2026-03-13T08:17:08.591Z",
+        "id": 8
+      },
+      {
+        "user_id": 3,
+        "action": "ORDER_CREATED",
+        "payload_json": "{\"orderId\":1}",
+        "created_at": "2026-03-13T08:17:10.438Z",
+        "id": 9
+      },
+      {
+        "user_id": 1,
+        "action": "LOGIN_SUCCESS",
+        "payload_json": "{\"username\":\"admin\"}",
+        "created_at": "2026-03-13T08:17:20.133Z",
+        "id": 10
+      },
+      {
+        "user_id": 1,
+        "action": "MENU_ITEM_CREATED",
+        "payload_json": "{\"menuItemId\":2}",
+        "created_at": "2026-03-13T08:17:43.254Z",
+        "id": 11
+      },
+      {
+        "user_id": 1,
+        "action": "MENU_ITEM_UPDATED",
+        "payload_json": "{\"menuItemId\":1}",
+        "created_at": "2026-03-13T08:17:50.046Z",
+        "id": 12
+      },
+      {
+        "user_id": 1,
+        "action": "MENU_ITEM_CREATED",
+        "payload_json": "{\"menuItemId\":3}",
+        "created_at": "2026-03-13T08:18:05.133Z",
+        "id": 13
+      },
+      {
+        "user_id": 1,
+        "action": "MENU_ITEM_CREATED",
+        "payload_json": "{\"menuItemId\":4}",
+        "created_at": "2026-03-13T08:18:26.267Z",
+        "id": 14
+      },
+      {
+        "user_id": 1,
+        "action": "MENU_ITEM_CREATED",
+        "payload_json": "{\"menuItemId\":5}",
+        "created_at": "2026-03-13T08:18:41.683Z",
+        "id": 15
+      },
+      {
+        "user_id": 3,
+        "action": "LOGIN_SUCCESS",
+        "payload_json": "{\"username\":\"cashier\"}",
+        "created_at": "2026-03-13T09:19:29.234Z",
+        "id": 16
+      },
+      {
+        "user_id": 1,
+        "action": "LOGIN_SUCCESS",
+        "payload_json": "{\"username\":\"admin\"}",
+        "created_at": "2026-03-13T09:23:10.373Z",
+        "id": 17
+      },
+      {
+        "user_id": 1,
+        "action": "MENU_ITEM_CREATED",
+        "payload_json": "{\"menuItemId\":6}",
+        "created_at": "2026-03-13T09:23:28.556Z",
+        "id": 18
+      },
+      {
+        "user_id": 1,
+        "action": "ORDER_CREATED",
+        "payload_json": "{\"orderId\":2}",
+        "created_at": "2026-03-13T09:23:34.660Z",
+        "id": 19
+      },
+      {
+        "user_id": 1,
+        "action": "ORDER_STATUS_UPDATED",
+        "payload_json": "{\"orderId\":2,\"status\":\"DRAFT\"}",
+        "created_at": "2026-03-13T09:23:40.756Z",
+        "id": 20
+      },
+      {
+        "user_id": 1,
+        "action": "ORDER_STATUS_UPDATED",
+        "payload_json": "{\"orderId\":2,\"status\":\"CANCELLED\"}",
+        "created_at": "2026-03-13T09:23:41.684Z",
+        "id": 21
+      },
+      {
+        "user_id": 1,
+        "action": "MENU_ITEM_CREATED",
+        "payload_json": "{\"menuItemId\":7}",
+        "created_at": "2026-03-13T09:24:25.011Z",
+        "id": 22
+      },
+      {
+        "user_id": 1,
+        "action": "MENU_ITEM_CREATED",
+        "payload_json": "{\"menuItemId\":8}",
+        "created_at": "2026-03-13T09:24:57.603Z",
+        "id": 23
+      },
+      {
+        "user_id": 1,
+        "action": "MENU_ITEM_UPDATED",
+        "payload_json": "{\"menuItemId\":8}",
+        "created_at": "2026-03-13T09:25:09.539Z",
+        "id": 24
+      },
+      {
+        "user_id": 3,
+        "action": "LOGIN_SUCCESS",
+        "payload_json": "{\"username\":\"cashier\"}",
+        "created_at": "2026-03-13T09:25:41.053Z",
+        "id": 25
+      },
+      {
+        "user_id": 3,
+        "action": "ORDER_CREATED",
+        "payload_json": "{\"orderId\":3}",
+        "created_at": "2026-03-13T09:25:43.572Z",
+        "id": 26
+      },
+      {
+        "user_id": 3,
+        "action": "ORDER_STATUS_UPDATED",
+        "payload_json": "{\"orderId\":1,\"status\":\"DRAFT\"}",
+        "created_at": "2026-03-13T09:25:46.637Z",
+        "id": 27
+      },
+      {
+        "user_id": 3,
+        "action": "ORDER_STATUS_UPDATED",
+        "payload_json": "{\"orderId\":1,\"status\":\"CANCELLED\"}",
+        "created_at": "2026-03-13T09:25:47.668Z",
+        "id": 28
+      },
+      {
+        "user_id": 3,
+        "action": "ORDER_STATUS_UPDATED",
+        "payload_json": "{\"orderId\":3,\"status\":\"DRAFT\"}",
+        "created_at": "2026-03-13T09:25:48.916Z",
+        "id": 29
+      },
+      {
+        "user_id": 3,
+        "action": "LOGIN_SUCCESS",
+        "payload_json": "{\"username\":\"cashier\"}",
+        "created_at": "2026-03-13T09:26:54.894Z",
+        "id": 30
+      },
+      {
+        "user_id": 3,
+        "action": "LOGIN_SUCCESS",
+        "payload_json": "{\"username\":\"cashier\"}",
+        "created_at": "2026-03-13T09:51:56.211Z",
+        "id": 31
+      },
+      {
+        "user_id": 3,
+        "action": "ORDER_CREATED",
+        "payload_json": "{\"orderId\":4}",
+        "created_at": "2026-03-13T09:51:57.673Z",
+        "id": 32
+      },
+      {
+        "user_id": 3,
+        "action": "ORDER_STATUS_UPDATED",
+        "payload_json": "{\"orderId\":4,\"status\":\"DRAFT\"}",
+        "created_at": "2026-03-13T09:52:00.096Z",
+        "id": 33
+      },
+      {
+        "user_id": 3,
+        "action": "ORDER_STATUS_UPDATED",
+        "payload_json": "{\"orderId\":4,\"status\":\"CANCELLED\"}",
+        "created_at": "2026-03-13T09:52:01.472Z",
+        "id": 34
+      },
+      {
+        "user_id": 3,
+        "action": "ORDER_STATUS_UPDATED",
+        "payload_json": "{\"orderId\":3,\"status\":\"DRAFT\"}",
+        "created_at": "2026-03-13T09:52:02.624Z",
+        "id": 35
+      },
+      {
+        "user_id": 3,
+        "action": "ORDER_STATUS_UPDATED",
+        "payload_json": "{\"orderId\":3,\"status\":\"FINALIZED\"}",
+        "created_at": "2026-03-13T09:52:04.793Z",
+        "id": 36
+      },
+      {
+        "user_id": 3,
+        "action": "ORDER_PAYMENT_ADDED",
+        "payload_json": "{\"orderId\":3,\"method\":\"CASH\",\"amount\":155000,\"received\":155000,\"change\":0,\"paidCents\":155000,\"remainingCents\":0}",
+        "created_at": "2026-03-13T09:52:26.626Z",
+        "id": 37
+      },
+      {
+        "user_id": null,
+        "action": "CASH_DRAWER_OPENED",
+        "payload_json": "{}",
+        "created_at": "2026-03-13T09:52:26.640Z",
+        "id": 38
+      },
+      {
+        "user_id": 3,
+        "action": "CASH_SESSION_CLOSED",
+        "payload_json": "{\"sessionId\":1,\"expected\":155100,\"actual\":155100,\"variance\":0}",
+        "created_at": "2026-03-13T09:52:42.409Z",
+        "id": 39
       }
     ],
     "employee_register": [],
@@ -77,21 +535,19 @@
   "seq": {
     "roles": 3,
     "users": 3,
-    "menu_items": 0,
+    "menu_items": 8,
     "ingredients": 0,
     "promotions": 0,
-    "orders": 0,
+    "orders": 4,
     "recipes": 0,
-    "order_items": 0,
-    "payments": 0,
-    "kitchen_tickets": 0,
-    "kitchen_ticket_items": 0,
+    "order_items": 7,
+    "payments": 1,
     "inventory_movements": 0,
     "purchase_orders": 0,
     "purchase_order_items": 0,
-    "cash_sessions": 0,
-    "cash_transactions": 0,
-    "audit_logs": 1,
+    "cash_sessions": 1,
+    "cash_transactions": 1,
+    "audit_logs": 39,
     "employee_register": 0,
     "employee_ledger": 0,
     "employee_salary_closures": 0

@@ -46,8 +46,6 @@ const ALL_TABLES = [
   "recipes",
   "order_items",
   "payments",
-  "kitchen_tickets",
-  "kitchen_ticket_items",
   "inventory_movements",
   "purchase_orders",
   "purchase_order_items",
@@ -249,6 +247,38 @@ function stripManualDiscount(row) {
   return rest;
 }
 
+function autoSplitMenuSizesLocal(db) {
+  if (!db || !db.data || !Array.isArray(db.data.menu_items)) return;
+  const sizeLabels = ["Small", "Medium", "Large", "Regular", "Jumbo", "Family", "Half", "Full"];
+  let changed = false;
+  for (const row of db.data.menu_items) {
+    if (!row || row.size) continue;
+    const rawName = String(row.name || "").trim();
+    for (const size of sizeLabels) {
+      const re = new RegExp(`^(.*?)(?:\\s+|\\s*-\\s*)(${size})$`, "i");
+      const m = re.exec(rawName);
+      if (!m) continue;
+      const baseName = String(m[1] || "").trim();
+      if (!baseName) continue;
+      const hasDuplicate = db.data.menu_items.some((r) => {
+        if (!r || r.id === row.id) return false;
+        const n = String(r.name || "").trim();
+        const c = String(r.category || "").trim();
+        const s = String(r.size || "").trim();
+        return n.toLowerCase() === baseName.toLowerCase()
+          && c.toLowerCase() === String(row.category || "").trim().toLowerCase()
+          && s.toLowerCase() === size.toLowerCase();
+      });
+      if (hasDuplicate) break;
+      row.name = baseName;
+      row.size = size;
+      changed = true;
+      break;
+    }
+  }
+  if (changed) db.save();
+}
+
 function todayKey(v) {
   const d = new Date(v);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -342,8 +372,6 @@ async function createDataBackup(userId, mode = "manual") {
     "recipes",
     "order_items",
     "payments",
-    "kitchen_tickets",
-    "kitchen_ticket_items",
     "inventory_movements",
     "purchase_orders",
     "purchase_order_items",
@@ -390,8 +418,6 @@ async function restoreDataBackup(userId, fileName) {
     "purchase_order_items",
     "purchase_orders",
     "inventory_movements",
-    "kitchen_ticket_items",
-    "kitchen_tickets",
     "payments",
     "order_items",
     "orders",
@@ -415,8 +441,6 @@ async function restoreDataBackup(userId, fileName) {
     "recipes",
     "order_items",
     "payments",
-    "kitchen_tickets",
-    "kitchen_ticket_items",
     "inventory_movements",
     "purchase_orders",
     "purchase_order_items",
@@ -501,7 +525,18 @@ async function orderItems(orderId) {
   const ids = Array.from(new Set(items.map((i) => i.menu_item_id).filter(Boolean)));
   const menu = ids.length ? await q("menu_items", (x) => x.in("id", ids)) : [];
   const by = new Map(menu.map((m) => [m.id, m]));
-  return items.map((i) => ({ ...i, item_name: by.get(i.menu_item_id)?.name || "Unknown Item", category: by.get(i.menu_item_id)?.category || null }));
+  return items.map((i) => {
+    const mi = by.get(i.menu_item_id);
+    const baseName = mi?.name || "Unknown Item";
+    const sizeLabel = String(mi?.size || "").trim();
+    const displayName = sizeLabel ? `${baseName} (${sizeLabel})` : baseName;
+    return {
+      ...i,
+      item_name: displayName,
+      category: mi?.category || null,
+      size: mi?.size || null
+    };
+  });
 }
 
 function promoDiscount(p, subtotal, items, menuById) {
@@ -663,15 +698,6 @@ async function deductStock(orderId, userId) {
   }
 }
 
-async function ensureKds(orderId) {
-  const ex = await q("kitchen_tickets", (x) => x.eq("order_id", orderId).limit(1));
-  if (ex[0]) return ex[0].id;
-  const t = await ins("kitchen_tickets", { order_id: orderId, status: "QUEUED", created_at: now(), updated_at: now() });
-  const items = await orderItems(orderId);
-  for (const it of items) await ins("kitchen_ticket_items", { ticket_id: t.id, menu_item_id: it.menu_item_id || null, menu_item_name: it.item_name, category: it.category || null, quantity: Number(it.quantity || 1) });
-  return t.id;
-}
-
 function registerIpc() {
   ipcMain.handle("auth:login", async (_, p) => {
     try {
@@ -683,9 +709,9 @@ function registerIpc() {
     } catch (e) { return { ok: false, error: e.message || "Login failed." }; }
   });
 
-  ipcMain.handle("menu:list", async (_, p = {}) => { try { if (p.includeInactive && !(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can manage menu." }; return { ok: true, items: await q("menu_items", (x) => (p.includeInactive ? x : x.eq("active", 1)).order("category", { ascending: true }).order("name", { ascending: true })) }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
-  ipcMain.handle("menu:create", async (_, p = {}) => { try { if (!(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can create menu items." }; if (!p.name || !p.category) return { ok: false, error: "Name and category are required." }; const price = Number(p.priceCents); if (!Number.isFinite(price) || price < 0) return { ok: false, error: "Invalid price." }; const row = await ins("menu_items", { name: String(p.name).trim(), category: String(p.category).trim(), price_cents: Math.round(price), active: p.active ? 1 : 0 }); await audit(p.userId, "MENU_ITEM_CREATED", { menuItemId: row.id }); return { ok: true, id: row.id }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
-  ipcMain.handle("menu:update", async (_, p = {}) => { try { if (!(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can update menu items." }; const it = await get("menu_items", p.menuItemId); if (!it) return { ok: false, error: "Menu item not found." }; const u = {}; if (p.name != null) u.name = String(p.name).trim(); if (p.category != null) u.category = String(p.category).trim(); if (p.priceCents != null) { const v = Number(p.priceCents); if (!Number.isFinite(v) || v < 0) return { ok: false, error: "Invalid price." }; u.price_cents = Math.round(v); } if (p.active != null) u.active = p.active ? 1 : 0; if (!Object.keys(u).length) return { ok: false, error: "No fields to update." }; await upd("menu_items", (x) => x.eq("id", p.menuItemId), u); await audit(p.userId, "MENU_ITEM_UPDATED", { menuItemId: p.menuItemId }); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
+  ipcMain.handle("menu:list", async (_, p = {}) => { try { if (p.includeInactive && !(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can manage menu." }; return { ok: true, items: await q("menu_items", (x) => (p.includeInactive ? x : x.eq("active", 1)).order("category", { ascending: true }).order("size", { ascending: true }).order("name", { ascending: true })) }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
+  ipcMain.handle("menu:create", async (_, p = {}) => { try { if (!(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can create menu items." }; if (!p.name || !p.category) return { ok: false, error: "Name and category are required." }; const price = Number(p.priceCents); if (!Number.isFinite(price) || price < 0) return { ok: false, error: "Invalid price." }; const size = p.size == null ? null : String(p.size).trim(); const row = await ins("menu_items", { name: String(p.name).trim(), category: String(p.category).trim(), size: size ? size : null, price_cents: Math.round(price), active: p.active ? 1 : 0 }); await audit(p.userId, "MENU_ITEM_CREATED", { menuItemId: row.id }); return { ok: true, id: row.id }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
+  ipcMain.handle("menu:update", async (_, p = {}) => { try { if (!(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can update menu items." }; const it = await get("menu_items", p.menuItemId); if (!it) return { ok: false, error: "Menu item not found." }; const u = {}; if (p.name != null) u.name = String(p.name).trim(); if (p.category != null) u.category = String(p.category).trim(); if (p.size != null) { const s = String(p.size).trim(); u.size = s ? s : null; } if (p.priceCents != null) { const v = Number(p.priceCents); if (!Number.isFinite(v) || v < 0) return { ok: false, error: "Invalid price." }; u.price_cents = Math.round(v); } if (p.active != null) u.active = p.active ? 1 : 0; if (!Object.keys(u).length) return { ok: false, error: "No fields to update." }; await upd("menu_items", (x) => x.eq("id", p.menuItemId), u); await audit(p.userId, "MENU_ITEM_UPDATED", { menuItemId: p.menuItemId }); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
 
   ipcMain.handle("promotions:list", async () => { try { return { ok: true, promotions: await q("promotions", (x) => x.order("active", { ascending: false }).order("id", { ascending: false })) }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("promotions:create", async (_, p = {}) => { try { if (!(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can create promotions." }; const row = await ins("promotions", { code: p.code ? String(p.code).trim().toUpperCase() : null, name: String(p.name).trim(), promo_type: String(p.promoType), value_num: Number(p.valueNum || 0), cap_cents: p.capCents == null || p.capCents === "" ? null : Math.max(0, Math.round(Number(p.capCents))), category: p.category ? String(p.category).trim() : null, start_time: p.startTime ? String(p.startTime).trim() : null, end_time: p.endTime ? String(p.endTime).trim() : null, days_mask: p.daysMask ? String(p.daysMask).trim() : null, active: p.active === false ? 0 : 1, auto_apply: p.autoApply ? 1 : 0, created_at: now() }); await audit(p.userId, "PROMOTION_CREATED", { promotionId: row.id }); return { ok: true, id: row.id }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
@@ -701,7 +727,7 @@ function registerIpc() {
   ipcMain.handle("orders:apply-promo", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (["PAID", "CANCELLED"].includes(o.status)) return { ok: false, error: "Promo can be applied only before payment/cancel." }; const code = String(p.promoCode || "").trim().toUpperCase(); if (!code) return { ok: false, error: "Promo code is required." }; const pr = await q("promotions", (x) => x.eq("active", 1).ilike("code", code).limit(1)); if (!pr[0]) return { ok: false, error: "Invalid promo code." }; if (!promoTimeOk(pr[0])) return { ok: false, error: "Promo is not active at this time." }; await upd("orders", (x) => x.eq("id", p.orderId), { promo_code: code, promo_id: pr[0].id, updated_at: now() }); const u = await recalc(p.orderId); await audit(p.userId || null, "ORDER_PROMO_APPLIED", { orderId: p.orderId, promoCode: code, promoId: pr[0].id }); return { ok: true, promo: u }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("orders:clear-promo", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (["PAID", "CANCELLED"].includes(o.status)) return { ok: false, error: "Promo can be cleared only before payment/cancel." }; await upd("orders", (x) => x.eq("id", p.orderId), { promo_code: null, promo_id: null, promo_discount_cents: 0, updated_at: now() }); await recalc(p.orderId); await audit(p.userId || null, "ORDER_PROMO_CLEARED", { orderId: p.orderId }); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("orders:update-customer", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (!["DRAFT", "HOLD"].includes(o.status)) return { ok: false, error: "Customer details can be updated only for DRAFT/HOLD orders." }; await upd("orders", (x) => x.eq("id", p.orderId), { customer_name: p.customerName ? String(p.customerName).trim() : null, customer_phone: p.customerPhone ? String(p.customerPhone).trim() : null, updated_at: now() }); await audit(p.userId || null, "ORDER_CUSTOMER_UPDATED", { orderId: p.orderId }); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
-  ipcMain.handle("orders:update-status", async (_, p) => { try { const st = String(p.status || "").toUpperCase(); if (!["DRAFT", "HOLD", "CANCELLED", "FINALIZED", "PAID"].includes(st)) return { ok: false, error: "Invalid status." }; const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (st === "FINALIZED" && !["FINALIZED", "PAID"].includes(o.status)) { const s = await shortages(p.orderId); if (s.length) return { ok: false, error: "Insufficient stock.", shortages: s }; await deductStock(p.orderId, p.userId); await ensureKds(p.orderId); } await upd("orders", (x) => x.eq("id", p.orderId), { status: st, updated_at: now() }); if (st === "CANCELLED") { const t = await q("kitchen_tickets", (x) => x.eq("order_id", p.orderId).limit(1)); if (t[0]) await upd("kitchen_tickets", (x) => x.eq("id", t[0].id), { status: "CANCELLED", updated_at: now() }); } await audit(p.userId || null, "ORDER_STATUS_UPDATED", { orderId: p.orderId, status: st }); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
+  ipcMain.handle("orders:update-status", async (_, p) => { try { const st = String(p.status || "").toUpperCase(); if (!["DRAFT", "HOLD", "CANCELLED", "FINALIZED", "PAID"].includes(st)) return { ok: false, error: "Invalid status." }; const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; if (st === "FINALIZED" && !["FINALIZED", "PAID"].includes(o.status)) { const s = await shortages(p.orderId); if (s.length) return { ok: false, error: "Insufficient stock.", shortages: s }; await deductStock(p.orderId, p.userId); } await upd("orders", (x) => x.eq("id", p.orderId), { status: st, updated_at: now() }); await audit(p.userId || null, "ORDER_STATUS_UPDATED", { orderId: p.orderId, status: st }); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("orders:add-payment", async (_, p) => { try { return await processPayment(p); } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("orders:pay-cash", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; const ex = await q("payments", (x) => x.eq("order_id", p.orderId)); const rem = Math.max(0, Number(o.total_cents || 0) - ex.reduce((a, r) => a + Number(r.amount_cents || 0), 0)); return await processPayment({ orderId: p.orderId, method: "CASH", amountCents: rem, receivedCents: p.receivedCents, userId: p.userId }); } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
 
@@ -968,9 +994,6 @@ function registerIpc() {
     } catch (e) { return { ok: false, error: e.message || "Failed to close salary month." }; }
   });
 
-  ipcMain.handle("kds:list", async (_, p = {}) => { try { const allowed = ["QUEUED", "PREPARING", "READY", "SERVED", "CANCELLED"]; let st = Array.isArray(p.statuses) ? p.statuses.map((s) => String(s).toUpperCase()).filter((s) => allowed.includes(s)) : ["QUEUED", "PREPARING", "READY"]; if (!st.length) st = ["QUEUED", "PREPARING", "READY"]; const t = await q("kitchen_tickets", (x) => x.in("status", st).order("id", { ascending: true })); const orderIds = t.map((v) => v.order_id); const os = orderIds.length ? await q("orders", (x) => x.in("id", orderIds)) : []; const ob = new Map(os.map((o) => [o.id, o])); const tids = t.map((v) => v.id); const it = tids.length ? await q("kitchen_ticket_items", (x) => x.in("ticket_id", tids).order("id", { ascending: true })) : []; const im = new Map(); for (const r of it) { const a = im.get(r.ticket_id) || []; a.push(r); im.set(r.ticket_id, a); } return { ok: true, tickets: t.map((r) => ({ ...r, customer_name: ob.get(r.order_id)?.customer_name || null, customer_phone: ob.get(r.order_id)?.customer_phone || null, items: im.get(r.id) || [] })) }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
-  ipcMain.handle("kds:update-status", async (_, p) => { try { const st = String(p.status || "").toUpperCase(); if (!["QUEUED", "PREPARING", "READY", "SERVED", "CANCELLED"].includes(st)) return { ok: false, error: "Invalid ticket status." }; const t = await get("kitchen_tickets", p.ticketId); if (!t) return { ok: false, error: "Ticket not found." }; const patch = { status: st, bumped_by_user_id: p.userId || null, updated_at: now() }; if (st === "PREPARING" && !t.started_at) patch.started_at = now(); if (st === "READY") patch.ready_at = now(); if (st === "SERVED") patch.served_at = now(); await upd("kitchen_tickets", (x) => x.eq("id", p.ticketId), patch); await audit(p.userId || null, "KDS_TICKET_STATUS_UPDATED", { ticketId: p.ticketId, orderId: t.order_id, status: st }); return { ok: true }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
-  ipcMain.handle("kds:bump", async (_, p) => { try { const t = await get("kitchen_tickets", p.ticketId); if (!t) return { ok: false, error: "Ticket not found." }; const n = ({ QUEUED: "PREPARING", PREPARING: "READY", READY: "SERVED", SERVED: "SERVED", CANCELLED: "CANCELLED" })[t.status] || t.status; if (n === t.status) return { ok: true, status: n }; const patch = { status: n, bumped_by_user_id: p.userId || null, updated_at: now() }; if (n === "PREPARING" && !t.started_at) patch.started_at = now(); if (n === "READY") patch.ready_at = now(); if (n === "SERVED") patch.served_at = now(); await upd("kitchen_tickets", (x) => x.eq("id", p.ticketId), patch); await audit(p.userId || null, "KDS_TICKET_BUMPED", { ticketId: p.ticketId, orderId: t.order_id, from: t.status, to: n }); return { ok: true, status: n }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
 
   ipcMain.handle("reports:summary", async (_, p) => {
     try {
@@ -981,12 +1004,24 @@ function registerIpc() {
       const sales = { paid_orders: paid.length, gross_sales: paid.reduce((a, o) => a + Number(o.total_cents || 0), 0) };
       const orderIds = paid.map((o) => o.id); const items = orderIds.length ? await q("order_items", (x) => x.in("order_id", orderIds)) : [];
       const menuIds = Array.from(new Set(items.map((i) => i.menu_item_id).filter(Boolean))); const menu = menuIds.length ? await q("menu_items", (x) => x.in("id", menuIds)) : []; const mb = new Map(menu.map((m) => [m.id, m]));
-      const top = new Map(); for (const i of items) { const n = mb.get(i.menu_item_id)?.name || "Unknown Item"; top.set(n, (top.get(n) || 0) + Number(i.quantity || 0)); }
+      const top = new Map(); for (const i of items) { const mi = mb.get(i.menu_item_id); const base = mi?.name || "Unknown Item"; const size = String(mi?.size || "").trim(); const n = size ? `${base} (${size})` : base; top.set(n, (top.get(n) || 0) + Number(i.quantity || 0)); }
       const topItems = Array.from(top.entries()).map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty).slice(0, 5);
       const users = await q("users", (x) => x.limit(1000)); const ub = new Map(users.map((u) => [u.id, u.username]));
       const cs = new Map(); for (const o of paid) { const c = ub.get(o.cashier_user_id) || null; const k = c || "-"; const prev = cs.get(k) || { cashier: c, paid_orders: 0, gross_sales: 0 }; prev.paid_orders += 1; prev.gross_sales += Number(o.total_cents || 0); cs.set(k, prev); }
       const cashierSales = Array.from(cs.values()).sort((a, b) => b.gross_sales - a.gross_sales);
       const categoryMargin = Array.from(new Set(menu.map((m) => m.category))).map((cat) => { const catItems = items.filter((i) => mb.get(i.menu_item_id)?.category === cat); const net = catItems.reduce((a, i) => a + Number(i.line_total_cents || 0), 0); return { category: cat, net_sales_cents: net, estimated_cost_cents: 0, gross_margin_cents: net }; });
+      const sizeMarginMap = new Map();
+      for (const i of items) {
+        const mi = mb.get(i.menu_item_id);
+        const category = mi?.category || "-";
+        const size = String(mi?.size || "").trim() || "-";
+        const key = `${category}||${size}`;
+        const prev = sizeMarginMap.get(key) || { category, size, net_sales_cents: 0, quantity: 0 };
+        prev.net_sales_cents += Number(i.line_total_cents || 0);
+        prev.quantity += Number(i.quantity || 0);
+        sizeMarginMap.set(key, prev);
+      }
+      const sizeMargin = Array.from(sizeMarginMap.values()).sort((a, b) => a.category.localeCompare(b.category) || a.size.localeCompare(b.size));
       const taxSummary = { taxable_sales_cents: paid.reduce((a, o) => a + Number(o.subtotal_cents || 0), 0), total_discount_cents: paid.reduce((a, o) => a + Number(o.discount_cents || 0), 0), tax_collected_cents: paid.reduce((a, o) => a + Number(o.tax_cents || 0), 0), net_sales_cents: paid.reduce((a, o) => a + Number(o.total_cents || 0), 0) };
       const sessions = await q("cash_sessions", (x) => x.order("id", { ascending: false }).limit(1000)); const tx = await q("cash_transactions", (x) => x.order("id", { ascending: false }).limit(5000));
       const openingFloat = sessions.filter((s) => isToday(s.opened_at)).reduce((a, s) => a + Number(s.opening_cents || 0), 0);
@@ -998,7 +1033,7 @@ function registerIpc() {
       const cash = sessions.slice(0, 10);
       const logs = await q("audit_logs", (x) => x.order("id", { ascending: false }).limit(100));
       const auditRows = logs.map((a) => ({ ...a, username: ub.get(a.user_id) || null }));
-      return { ok: true, summary: { sales, topItems, cashierSales, categoryMargin, taxSummary, eodClose, lowStock, cash, audit: auditRows } };
+      return { ok: true, summary: { sales, topItems, cashierSales, categoryMargin, sizeMargin, taxSummary, eodClose, lowStock, cash, audit: auditRows } };
     } catch (e) { return { ok: false, error: e.message || "Failed." }; }
   });
 
@@ -1024,7 +1059,6 @@ function registerIpc() {
   ipcMain.handle("reports:export-csv", async (_, p) => { try { const days = p.range === "monthly" ? 30 : p.range === "weekly" ? 7 : 1; const since = new Date(); since.setDate(since.getDate() - days); const sMs = since.getTime(); const rows = (await q("orders", (x) => x.eq("status", "PAID").order("id", { ascending: false }).limit(10000))).filter((o) => new Date(o.created_at).getTime() >= sMs); const users = await q("users", (x) => x.limit(1000)); const ub = new Map(users.map((u) => [u.id, u.username])); const { canceled, filePath } = await dialog.showSaveDialog({ title: "Export Sales CSV", defaultPath: `sales-${p.range || "daily"}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] }); if (canceled || !filePath) return { ok: false, error: "Export canceled." }; const lines = ["order_id,created_at,cashier,total"]; for (const r of rows) lines.push(`${r.id},${r.created_at},${ub.get(r.cashier_user_id) || ""},${(Number(r.total_cents || 0) / 100).toFixed(2)}`); fs.writeFileSync(filePath, lines.join("\n"), "utf8"); return { ok: true, filePath }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
 
   ipcMain.handle("system:print-receipt", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; const fp = await receiptPdf(p.orderId); await audit(null, "RECEIPT_PRINT_REQUESTED", { orderId: p.orderId, receiptPath: fp }); return { ok: true, message: "Receipt generated.", receiptPath: fp }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
-  ipcMain.handle("system:send-kot", async (_, p) => { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; await audit(null, "KOT_PRINT_REQUESTED", { orderId: p.orderId }); return { ok: true, message: "KOT print request queued (simulated)." }; });
   ipcMain.handle("system:open-cash-drawer", async () => { await audit(null, "CASH_DRAWER_OPENED", {}); return { ok: true, message: "Cash drawer signal triggered (simulated)." }; });
   ipcMain.handle("system:create-backup", async (_, p = {}) => { try { if (!(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can create backup." }; const x = await createDataBackup(p.userId || null, "manual"); return { ok: true, ...x }; } catch (e) { return { ok: false, error: e.message || "Failed to create backup." }; } });
   ipcMain.handle("system:list-backups", async () => { try { return { ok: true, backups: listBackupFiles() }; } catch (e) { return { ok: false, error: e.message || "Failed to list backups." }; } });
@@ -1056,6 +1090,7 @@ app.whenReady().then(async () => {
   fs.mkdirSync(DAILY_BACKUPS_DIR, { recursive: true });
   if (DATA_SOURCE === "local") {
     sb = new LocalDb(LOCAL_DB_PATH);
+    autoSplitMenuSizesLocal(sb);
     sbState.enabled = true;
     sbState.url = LOCAL_DB_PATH;
     sbState.lastCheckAt = now();

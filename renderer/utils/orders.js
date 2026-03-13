@@ -90,9 +90,6 @@
     return assertOk(await window.posAPI.printReceipt({ orderId }));
   }
 
-  async function sendKot(orderId) {
-    return assertOk(await window.posAPI.sendKot({ orderId }));
-  }
 
   window.POSUtils = window.POSUtils || {};
   window.POSUtils.orders = {
@@ -116,6 +113,5 @@
     payOrderCash,
     addOrderPayment,
     printReceipt,
-    sendKot
   };
 })();

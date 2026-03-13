@@ -2,6 +2,7 @@
   const { useEffect, useMemo, useState } = React;
   const { money } = window.POSUtils.db;
   const ADD_NEW_CATEGORY = "__ADD_NEW_CATEGORY__";
+  const ALL_SIZES = "__ALL_SIZES__";
 
   function imageStyleFromName(name) {
     const seed = Array.from(name).reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
@@ -26,7 +27,7 @@
     return "\u{1F372}";
   }
 
-  function OrderScreen({ user, onOrderSelected }) {
+  function OrderScreen({ user, onOrderSelected, onGoToPayment }) {
     const canManageMenu = user.role === "ADMIN" || user.role === "MANAGER";
 
     const [menu, setMenu] = useState([]);
@@ -47,14 +48,17 @@
     const [newName, setNewName] = useState("");
     const [newCategory, setNewCategory] = useState("");
     const [newCategoryCustom, setNewCategoryCustom] = useState("");
+    const [newSize, setNewSize] = useState("");
     const [newPrice, setNewPrice] = useState("");
     const [newActive, setNewActive] = useState(true);
     const [editId, setEditId] = useState("");
     const [editName, setEditName] = useState("");
     const [editCategory, setEditCategory] = useState("");
     const [editCategoryCustom, setEditCategoryCustom] = useState("");
+    const [editSize, setEditSize] = useState("");
     const [editPrice, setEditPrice] = useState("");
     const [editActive, setEditActive] = useState(true);
+    const [activeSize, setActiveSize] = useState(ALL_SIZES);
 
     async function loadMenu() {
       setMenu(await window.POSUtils.orders.listMenu(user.id, canManageMenu));
@@ -109,9 +113,13 @@
     async function addItem(menuItemId) {
       setError("");
       try {
+        const prevCount = orderData?.items ? orderData.items.length : 0;
         const id = await ensureOrder();
         await window.POSUtils.orders.addOrderItem(id, menuItemId, 1);
-        await refreshOrder(id);
+        const refreshed = await refreshOrder(id);
+        if (onGoToPayment && prevCount === 0 && (refreshed?.items?.length || 0) > 0) {
+          onGoToPayment();
+        }
       } catch (err) {
         setError(err.message || "Failed to add item.");
       }
@@ -229,9 +237,9 @@
       setError("");
       try {
         await window.POSUtils.orders.setOrderStatus(orderId, "FINALIZED", user.id);
-        await window.POSUtils.orders.sendKot(orderId);
         await refreshOrder(orderId);
-        setStatusMsg("Order sent.");
+        setStatusMsg("Order ready for payment.");
+        if (onGoToPayment) onGoToPayment();
       } catch (err) {
         if (err.shortages) {
           setError("Stock shortage: " + err.shortages.map((s) => s.ingredient_name).join(", "));
@@ -246,6 +254,7 @@
       setEditName(item.name);
       setEditCategory(item.category);
       setEditCategoryCustom("");
+      setEditSize(item.size || "");
       setEditPrice((Number(item.price_cents || 0) / 100).toFixed(2));
       setEditActive(!!item.active);
     }
@@ -258,6 +267,7 @@
         await window.POSUtils.orders.createMenuItem(user.id, {
           name: newName,
           category: resolvedCategory,
+          size: newSize,
           priceCents: Math.round(Number(newPrice || 0) * 100),
           active: newActive
         });
@@ -265,6 +275,7 @@
         setNewName("");
         setNewCategory("");
         setNewCategoryCustom("");
+        setNewSize("");
         setNewPrice("");
         setNewActive(true);
         await loadMenu();
@@ -281,6 +292,7 @@
         await window.POSUtils.orders.updateMenuItem(user.id, Number(editId), {
           name: editName,
           category: resolvedCategory,
+          size: editSize,
           priceCents: Math.round(Number(editPrice || 0) * 100),
           active: editActive
         });
@@ -330,6 +342,16 @@
     }, [menu]);
 
     const categoryOptions = useMemo(() => tabs.filter((t) => t !== "ALL"), [tabs]);
+    const sizeTabs = useMemo(() => {
+      if (activeTab === "ALL") return [];
+      const sizes = Array.from(new Set(
+        menu
+          .filter((m) => m.active && m.category === activeTab)
+          .map((m) => String(m.size || "").trim())
+          .filter((s) => s.length > 0)
+      ));
+      return sizes.length ? [ALL_SIZES, ...sizes] : [];
+    }, [menu, activeTab]);
 
     useEffect(() => {
       if (!tabs.includes(activeTab)) {
@@ -337,11 +359,23 @@
       }
     }, [tabs, activeTab]);
 
+    useEffect(() => {
+      if (!sizeTabs.length) {
+        if (activeSize !== ALL_SIZES) setActiveSize(ALL_SIZES);
+        return;
+      }
+      if (!sizeTabs.includes(activeSize)) {
+        setActiveSize(sizeTabs[0]);
+      }
+    }, [sizeTabs, activeSize]);
+
     const visibleMenu = useMemo(() => {
       const activeOnly = menu.filter((m) => m.active);
       if (activeTab === "ALL") return activeOnly;
-      return activeOnly.filter((m) => m.category === activeTab);
-    }, [menu, activeTab]);
+      const sized = activeOnly.filter((m) => m.category === activeTab);
+      if (activeSize === ALL_SIZES || !activeSize) return sized;
+      return sized.filter((m) => String(m.size || "").trim() === activeSize);
+    }, [menu, activeTab, activeSize]);
 
     const billItems = orderData?.items || [];
     const subtotal = orderData?.order?.subtotal_cents || 0;
@@ -383,6 +417,7 @@
                         onChange={(e) => setNewCategoryCustom(e.target.value)}
                       />
                     )}
+                    <input placeholder="Size (optional)" value={newSize} onChange={(e) => setNewSize(e.target.value)} />
                     <input placeholder="Price" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} />
                     <select value={newActive ? "1" : "0"} onChange={(e) => setNewActive(e.target.value === "1")}>
                       <option value="1">Active</option>
@@ -392,13 +427,14 @@
                   </div>
                   <table className="table">
                     <thead>
-                      <tr><th>Name</th><th>Category</th><th>Price</th><th>Status</th><th></th><th></th></tr>
+                      <tr><th>Name</th><th>Category</th><th>Size</th><th>Price</th><th>Status</th><th></th><th></th></tr>
                     </thead>
                     <tbody>
                       {menu.map((item) => (
                         <tr key={item.id}>
                           <td>{item.name}</td>
                           <td>{item.category}</td>
+                          <td>{item.size || "-"}</td>
                           <td>{money(item.price_cents)}</td>
                           <td>{item.active ? "Active" : "Inactive"}</td>
                           <td><button onClick={() => beginEdit(item)}>Edit</button></td>
@@ -425,6 +461,7 @@
                             onChange={(e) => setEditCategoryCustom(e.target.value)}
                           />
                         )}
+                        <input placeholder="Size (optional)" value={editSize} onChange={(e) => setEditSize(e.target.value)} />
                         <input value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
                         <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
                           <option value="1">Active</option>
@@ -447,6 +484,15 @@
               </button>
             ))}
           </div>
+          {activeTab !== "ALL" && sizeTabs.length > 0 && (
+            <div className="size-tabs">
+              {sizeTabs.map((tab) => (
+                <button key={tab} className={activeSize === tab ? "size-tab active" : "size-tab"} onClick={() => setActiveSize(tab)}>
+                  {tab === ALL_SIZES ? "All Sizes" : tab}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="menu-grid-replica">
             {loading ? (
@@ -460,6 +506,12 @@
                     <span>CATEGORY:</span>
                     <i>{item.category || "-"}</i>
                   </div>
+                  {item.size && (
+                    <div className="food-size-line">
+                      <span>SIZE:</span>
+                      <i>{item.size}</i>
+                    </div>
+                  )}
                 </button>
               ))
             )}
@@ -587,7 +639,7 @@
             <button onClick={startNewOrder}>NEW</button>
             <button onClick={holdOrder} disabled={!orderId}>HOLD</button>
             <button className="danger-lite" onClick={cancelOrder}>CANCEL ORDER</button>
-            <button className="send-lite" onClick={finalizeOrder}>SEND ORDER</button>
+            <button className="send-lite" onClick={finalizeOrder}>GO TO PAYMENT</button>
           </div>
 
           {statusMsg && <div className="success">{statusMsg}</div>}

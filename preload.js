@@ -47,9 +47,6 @@ contextBridge.exposeInMainWorld("posAPI", {
   deleteEmployeeLedgerEntry: (payload) => ipcRenderer.invoke("employee:delete-ledger-entry", payload),
   closeEmployeeCurrentMonth: (payload) => ipcRenderer.invoke("employee:close-current-month", payload),
 
-  listKitchenTickets: (payload) => ipcRenderer.invoke("kds:list", payload),
-  updateKitchenTicketStatus: (payload) => ipcRenderer.invoke("kds:update-status", payload),
-  bumpKitchenTicket: (payload) => ipcRenderer.invoke("kds:bump", payload),
 
   getReportSummary: (payload) => ipcRenderer.invoke("reports:summary", payload),
   getProcurementReport: () => ipcRenderer.invoke("reports:procurement"),
@@ -57,7 +54,6 @@ contextBridge.exposeInMainWorld("posAPI", {
   exportReportCsv: (payload) => ipcRenderer.invoke("reports:export-csv", payload),
 
   printReceipt: (payload) => ipcRenderer.invoke("system:print-receipt", payload),
-  sendKot: (payload) => ipcRenderer.invoke("system:send-kot", payload),
   openCashDrawer: () => ipcRenderer.invoke("system:open-cash-drawer"),
   createBackup: (payload) => ipcRenderer.invoke("system:create-backup", payload),
   listBackups: () => ipcRenderer.invoke("system:list-backups"),

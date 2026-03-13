@@ -23,18 +23,19 @@ on conflict (id) do update set
   role_id = excluded.role_id,
   active = excluded.active;
 
-insert into public.menu_items (id, name, category, price_cents, active)
+insert into public.menu_items (id, name, category, size, price_cents, active)
 values
-  (1, 'Classic Burger', 'Burger', 599, 1),
-  (2, 'Cheese Burger', 'Burger', 699, 1),
-  (3, 'Crispy Chicken Burger', 'Burger', 749, 1),
-  (4, 'Fries - Regular', 'Sides', 299, 1),
-  (5, 'Fries - Large', 'Sides', 399, 1),
-  (6, 'Soda', 'Drinks', 199, 1),
-  (7, 'Iced Tea', 'Drinks', 249, 1)
+  (1, 'Classic Burger', 'Burger', null, 599, 1),
+  (2, 'Cheese Burger', 'Burger', null, 699, 1),
+  (3, 'Crispy Chicken Burger', 'Burger', null, 749, 1),
+  (4, 'Fries', 'Sides', 'Regular', 299, 1),
+  (5, 'Fries', 'Sides', 'Large', 399, 1),
+  (6, 'Soda', 'Drinks', null, 199, 1),
+  (7, 'Iced Tea', 'Drinks', null, 249, 1)
 on conflict (id) do update set
   name = excluded.name,
   category = excluded.category,
+  size = excluded.size,
   price_cents = excluded.price_cents,
   active = excluded.active;
 

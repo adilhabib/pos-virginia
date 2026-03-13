@@ -214,6 +214,23 @@
             </tbody>
           </table>
 
+          <h3>Category Size Breakdown ({range})</h3>
+          <table className="table">
+            <thead>
+              <tr><th>Category</th><th>Size</th><th>Qty</th><th>Net Sales</th></tr>
+            </thead>
+            <tbody>
+              {(summary?.sizeMargin || []).map((c) => (
+                <tr key={`size-${c.category}-${c.size}`}>
+                  <td>{c.category}</td>
+                  <td>{c.size}</td>
+                  <td>{c.quantity}</td>
+                  <td>{money(c.net_sales_cents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
           <h3>Tax Summary ({range})</h3>
           <table className="table">
             <tbody>
