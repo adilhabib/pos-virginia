@@ -22,7 +22,7 @@
   "license": "MIT",
   "build": {
     "appId": "com.virginia.pos",
-    "productName": "Virginia POS",
+    "productName": "virginia-pos",
     "directories": {
       "output": "dist"
     },
@@ -39,7 +39,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "artifactName": "${productName}.${ext}"
     }
   },
   "dependencies": {
