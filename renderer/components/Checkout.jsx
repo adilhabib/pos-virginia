@@ -113,6 +113,31 @@
       }
     }
 
+    async function printPendingBill() {
+      if (!order?.id) return;
+      setError("");
+      setMessage("");
+      setProcessing(true);
+      try {
+        if (remainingCents <= 0) {
+          throw new Error("Order is already fully paid.");
+        }
+        await window.POSUtils.orders.setOrderStatus(order.id, "HOLD", user.id);
+        const receipt = await window.POSUtils.orders.printReceipt(order.id);
+        await refreshOrder();
+        await refreshPayments();
+        setMessage(
+          receipt?.receiptPath
+            ? `Pending bill printed: ${receipt.receiptPath}`
+            : "Pending bill printed."
+        );
+      } catch (err) {
+        setError(err.message || "Unable to print pending bill.");
+      } finally {
+        setProcessing(false);
+      }
+    }
+
     useEffect(() => {
       if (!order?.id) {
         setPayments([]);
@@ -185,7 +210,9 @@
 
               <div className="pay-lines">
                 <div><span>SUBTOTAL</span><b>{money(subtotal)}</b></div>
-                <div><span>DISCOUNT</span><b>{money(discountCents)}</b></div>
+                {discountCents > 0 && (
+                  <div><span>DISCOUNT</span><b>{money(discountCents)}</b></div>
+                )}
                 <div><span>THIS PAYMENT</span><b>{money(appliedAmountCents)}</b></div>
                 <div><span>PAID SO FAR</span><b>{money(paidCents)}</b></div>
                 <div><span>REMAINING</span><b>{money(remainingCents)}</b></div>
@@ -199,12 +226,19 @@
               </div>
 
               <div className="payment-history">
-                {(payments || []).map((p) => (
-                  <div key={p.id} className="payment-history-row">
-                    <span>#{p.id} {p.method}</span>
-                    <span>{money(p.amount_cents)}</span>
+                {(payments || []).length === 0 ? (
+                  <div className="payment-history-row">
+                    <span>PENDING</span>
+                    <span>{money(remainingCents)}</span>
                   </div>
-                ))}
+                ) : (
+                  (payments || []).map((p) => (
+                    <div key={p.id} className="payment-history-row">
+                      <span>#{p.id} {p.method}</span>
+                      <span>{money(p.amount_cents)}</span>
+                    </div>
+                  ))
+                )}
               </div>
 
               <button
@@ -214,6 +248,11 @@
               >
                 {processing ? "PROCESSING..." : "ADD PAYMENT"}
               </button>
+              {remainingCents > 0 && (
+                <button className="pay-now pending-print" disabled={processing} onClick={printPendingBill}>
+                  PRINT PENDING BILL
+                </button>
+              )}
 
               {message && <div className="success">{message}</div>}
               {error && <div className="error">{error}</div>}

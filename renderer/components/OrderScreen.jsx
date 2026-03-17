@@ -630,8 +630,12 @@
 
           <div className="summary-totals">
             <div><span>Subtotal:</span><b>{money(subtotal)}</b></div>
-            <div><span>Discount:</span><b>{money(manualDiscountApplied)}</b></div>
-            <div><span>Promo:</span><b>{money(promoDiscountApplied)}</b></div>
+            {manualDiscountApplied > 0 && (
+              <div><span>Discount:</span><b>{money(manualDiscountApplied)}</b></div>
+            )}
+            {promoDiscountApplied > 0 && (
+              <div><span>Promo:</span><b>{money(promoDiscountApplied)}</b></div>
+            )}
             <div className="grand"><span>Total:</span><b>{money(total)}</b></div>
           </div>
 

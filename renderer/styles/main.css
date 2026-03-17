@@ -601,20 +601,25 @@ select {
 
 .summary-totals {
   margin-top: 8px;
-  border: 1px dashed #b8c0c7;
+  border: 1px solid #d8dde2;
   border-radius: 12px;
   padding: 12px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(20, 28, 34, 0.06);
 }
 
 .summary-totals > div {
   display: flex;
   justify-content: space-between;
   margin: 8px 0;
+  font-size: 1.02rem;
 }
 
 .summary-totals .grand {
   margin-top: 16px;
-  font-size: 2.2rem;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .summary-actions {
@@ -805,14 +810,16 @@ select {
   display: flex;
   justify-content: space-between;
   margin: 6px 0;
-  font-size: 1.55rem;
+  font-size: 1.4rem;
 }
 
 .pay-total {
   display: flex;
   justify-content: space-between;
   margin-top: 14px;
-  font-size: 2.2rem;
+  font-size: 1.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .pay-change {
@@ -854,6 +861,15 @@ select {
   font-size: 2.4rem;
   letter-spacing: 0.25em;
   font-weight: 700;
+}
+
+.pay-now.pending-print {
+  background: #f0f2f4;
+  color: #3d4a52;
+  border: 1px solid #cfd6db;
+  height: 56px;
+  font-size: 1.35rem;
+  letter-spacing: 0.12em;
 }
 
 /* Employees */
