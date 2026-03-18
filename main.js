@@ -24,11 +24,14 @@ function loadEnvFromKnownPaths() {
   }
 }
 
-const STORAGE_BASE_DIR = app.isPackaged ? app.getPath("userData") : __dirname;
-const RECEIPTS_DIR = path.join(STORAGE_BASE_DIR, "backup", "receipts");
-const DAILY_BACKUPS_DIR = path.join(STORAGE_BASE_DIR, "backup", "daily_backups");
+const userDataPath = app.getPath("userData");
+const DATA_DIR = path.join(userDataPath, "data");
+const LOGS_DIR = path.join(userDataPath, "logs");
+const CONFIG_PATH = path.join(userDataPath, "config.json");
+const RECEIPTS_DIR = path.join(DATA_DIR, "receipts");
+const DAILY_BACKUPS_DIR = path.join(DATA_DIR, "daily_backups");
 const DATA_SOURCE = String(process.env.POS_DATA_SOURCE || "local").trim().toLowerCase();
-const LOCAL_DB_PATH = path.join(STORAGE_BASE_DIR, "local-db.json");
+const LOCAL_DB_PATH = path.join(DATA_DIR, "local-db.json");
 let sb = null;
 const sbState = { enabled: false, url: null, lastCheckAt: null, lastSyncAt: null, lastSyncError: null, dataSource: DATA_SOURCE === "local" ? "local" : "supabase" };
 const now = () => new Date().toISOString();
@@ -36,6 +39,116 @@ const money = (c) => new Intl.NumberFormat("en-PK", { style: "currency", currenc
 const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;");
 const hashPin = (pin) => crypto.createHash("sha256").update(String(pin)).digest("hex");
 const schemaCompat = { ordersHasManualDiscountCents: true };
+
+console.log("User Data Path:", userDataPath);
+console.log("Database Path:", LOCAL_DB_PATH);
+console.log("__dirname:", __dirname);
+console.log("userDataPath:", app.getPath("userData"));
+
+function logLine(level, ...args) {
+  try {
+    const stamp = new Date().toISOString();
+    const line = `[${stamp}] [${level}] ${args.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join(" ")}\n`;
+    ensureDir(LOGS_DIR);
+    fs.appendFileSync(path.join(LOGS_DIR, "app.log"), line, "utf8");
+  } catch (_) {
+    // Avoid crashing on logging failures
+  }
+}
+
+process.on("unhandledRejection", (err) => {
+  console.error(err);
+  logLine("ERROR", "unhandledRejection", err?.message || err);
+});
+
+function ensureDir(dirPath) {
+  try {
+    if (!fs.existsSync(dirPath)) {
+      fs.mkdirSync(dirPath, { recursive: true });
+    }
+  } catch (err) {
+    console.error("Failed to create directory:", dirPath, err);
+    throw err;
+  }
+}
+
+function movePathIfNeeded(srcPath, destPath) {
+  try {
+    if (!fs.existsSync(srcPath) || fs.existsSync(destPath)) return;
+    const st = fs.statSync(srcPath);
+    if (!st.isFile()) return;
+    ensureDir(path.dirname(destPath));
+    try {
+      fs.renameSync(srcPath, destPath);
+    } catch (err) {
+      fs.copyFileSync(srcPath, destPath);
+      fs.unlinkSync(srcPath);
+    }
+    console.log("Migrated storage path:", srcPath, "->", destPath);
+  } catch (err) {
+    console.error("Failed to migrate path:", srcPath, "->", destPath, err);
+  }
+}
+
+function moveDirIfNeeded(srcDir, destDir) {
+  try {
+    if (!fs.existsSync(srcDir) || fs.existsSync(destDir)) return;
+    const st = fs.statSync(srcDir);
+    if (!st.isDirectory()) return;
+    ensureDir(path.dirname(destDir));
+    try {
+      fs.renameSync(srcDir, destDir);
+    } catch (err) {
+      ensureDir(destDir);
+      for (const name of fs.readdirSync(srcDir)) {
+        const from = path.join(srcDir, name);
+        const to = path.join(destDir, name);
+        if (fs.statSync(from).isDirectory()) {
+          moveDirIfNeeded(from, to);
+        } else {
+          movePathIfNeeded(from, to);
+        }
+      }
+      fs.rmSync(srcDir, { recursive: true, force: true });
+    }
+    console.log("Migrated storage dir:", srcDir, "->", destDir);
+  } catch (err) {
+    console.error("Failed to migrate dir:", srcDir, "->", destDir, err);
+  }
+}
+
+function migrateLegacyStorage() {
+  const legacyBases = [];
+  if (!__dirname.includes("app.asar")) {
+    legacyBases.push(__dirname);
+  }
+  legacyBases.push(userDataPath);
+  for (const base of legacyBases) {
+    const legacyDb = path.join(base, "local-db.json");
+    const legacyReceipts = path.join(base, "backup", "receipts");
+    const legacyBackups = path.join(base, "backup", "daily_backups");
+    movePathIfNeeded(legacyDb, LOCAL_DB_PATH);
+    moveDirIfNeeded(legacyReceipts, RECEIPTS_DIR);
+    moveDirIfNeeded(legacyBackups, DAILY_BACKUPS_DIR);
+  }
+}
+
+function ensureConfig() {
+  try {
+    if (!fs.existsSync(CONFIG_PATH)) {
+      const defaultConfig = {
+        version: 1,
+        created_at: now(),
+        dataDir: DATA_DIR
+      };
+      ensureDir(path.dirname(CONFIG_PATH));
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2), "utf8");
+    }
+  } catch (err) {
+    console.error("Failed to ensure config:", CONFIG_PATH, err);
+    logLine("ERROR", "Failed to ensure config:", CONFIG_PATH, err.message || err);
+  }
+}
 const ALL_TABLES = [
   "roles",
   "users",
@@ -201,10 +314,15 @@ class LocalDb {
     this._load();
   }
   _load() {
-    if (fs.existsSync(this.filePath)) {
-      const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
-      this.data = parsed?.data && typeof parsed.data === "object" ? parsed.data : {};
-      this.seq = parsed?.seq && typeof parsed.seq === "object" ? parsed.seq : {};
+    try {
+      if (fs.existsSync(this.filePath)) {
+        const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
+        this.data = parsed?.data && typeof parsed.data === "object" ? parsed.data : {};
+        this.seq = parsed?.seq && typeof parsed.seq === "object" ? parsed.seq : {};
+      }
+    } catch (err) {
+      console.error("Failed to load local DB:", this.filePath, err);
+      throw err;
     }
     for (const t of ALL_TABLES) {
       if (!Array.isArray(this.data[t])) this.data[t] = [];
@@ -227,8 +345,13 @@ class LocalDb {
     this.data[table].push({ ...clone(row), id: this.seq[table] });
   }
   save() {
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify({ version: 1, data: this.data, seq: this.seq }, null, 2), "utf8");
+    try {
+      ensureDir(path.dirname(this.filePath));
+      fs.writeFileSync(this.filePath, JSON.stringify({ version: 1, data: this.data, seq: this.seq }, null, 2), "utf8");
+    } catch (err) {
+      console.error("Failed to save local DB:", this.filePath, err);
+      throw err;
+    }
   }
   from(table) {
     if (!this.data[table]) this.data[table] = [];
@@ -1094,10 +1217,19 @@ function supabaseConnectivityHint(url, error) {
 
 app.whenReady().then(async () => {
   loadEnvFromKnownPaths();
-  fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
-  fs.mkdirSync(DAILY_BACKUPS_DIR, { recursive: true });
+  ensureDir(DATA_DIR);
+  ensureDir(LOGS_DIR);
+  ensureConfig();
+  logLine("INFO", "User Data Path:", userDataPath);
+  logLine("INFO", "Database Path:", LOCAL_DB_PATH);
+  migrateLegacyStorage();
+  ensureDir(RECEIPTS_DIR);
+  ensureDir(DAILY_BACKUPS_DIR);
   if (DATA_SOURCE === "local") {
     sb = new LocalDb(LOCAL_DB_PATH);
+    if (!fs.existsSync(LOCAL_DB_PATH)) {
+      sb.save();
+    }
     autoSplitMenuSizesLocal(sb);
     sbState.enabled = true;
     sbState.url = LOCAL_DB_PATH;

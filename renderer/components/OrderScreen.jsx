@@ -264,13 +264,29 @@
       setStatusMsg("");
       try {
         const resolvedCategory = newCategory === ADD_NEW_CATEGORY ? newCategoryCustom : newCategory;
-        await window.POSUtils.orders.createMenuItem(user.id, {
-          name: newName,
-          category: resolvedCategory,
-          size: newSize,
-          priceCents: Math.round(Number(newPrice || 0) * 100),
-          active: newActive
-        });
+        const baseSize = String(newSize || "").trim();
+        const rawSizes = baseSize
+          ? baseSize.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+          : [""];
+        const seen = new Set();
+        for (const raw of rawSizes) {
+          const [sizePart, pricePart] = raw.split(":").map((s) => s.trim());
+          const size = sizePart || "";
+          const priceOverride = pricePart ? Math.round(Number(pricePart) * 100) : null;
+          const priceCents = priceOverride != null && Number.isFinite(priceOverride)
+            ? priceOverride
+            : Math.round(Number(newPrice || 0) * 100);
+          const key = `${size}::${priceCents}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          await window.POSUtils.orders.createMenuItem(user.id, {
+            name: newName,
+            category: resolvedCategory,
+            size: size || null,
+            priceCents,
+            active: newActive
+          });
+        }
         setStatusMsg("Menu item created.");
         setNewName("");
         setNewCategory("");
@@ -417,7 +433,11 @@
                         onChange={(e) => setNewCategoryCustom(e.target.value)}
                       />
                     )}
-                    <input placeholder="Size (optional)" value={newSize} onChange={(e) => setNewSize(e.target.value)} />
+                    <input
+                      placeholder="Size (optional, e.g. Small:300, Medium:450)"
+                      value={newSize}
+                      onChange={(e) => setNewSize(e.target.value)}
+                    />
                     <input placeholder="Price" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} />
                     <select value={newActive ? "1" : "0"} onChange={(e) => setNewActive(e.target.value === "1")}>
                       <option value="1">Active</option>
