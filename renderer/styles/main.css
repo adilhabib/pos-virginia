@@ -1042,6 +1042,178 @@ select {
   margin-bottom: 10px;
 }
 
+.credit-register .credit-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.credit-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.credit-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.credit-tab {
+  border-radius: 999px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  background: #f7f8f9;
+  font-size: 0.9rem;
+}
+
+.credit-tab.active {
+  background: var(--teal-strong);
+  color: #fff;
+  border-color: var(--teal-strong);
+}
+
+.credit-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.credit-stat {
+  background: #f9fafb;
+  border: 1px solid #e2e6ea;
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.credit-stat strong {
+  font-size: 1.2rem;
+}
+
+.credit-stat small {
+  color: var(--muted);
+}
+
+.credit-top-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.credit-top-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 6px;
+}
+
+.credit-top-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.credit-form {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.credit-form > * {
+  flex: 1 1 180px;
+}
+
+.credit-form button {
+  flex: 0 0 auto;
+  min-width: 150px;
+}
+
+.credit-toolbar {
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.credit-toolbar > * {
+  flex: 0 1 200px;
+}
+
+.credit-table-wrap {
+  max-height: 420px;
+  overflow: auto;
+  margin-top: 10px;
+}
+
+.credit-row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.credit-ledger-wrap {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+.credit-ledger-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.credit-ledger-balance {
+  text-align: right;
+}
+
+.credit-ledger-balance strong {
+  display: block;
+  font-size: 1.2rem;
+}
+
+.secondary {
+  background: #e9edf0;
+  border-color: #d7dde2;
+  color: #2d3a40;
+}
+
+.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .credit-ledger-print,
+  .credit-ledger-print * {
+    visibility: visible;
+  }
+  .credit-ledger-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}
+
 @media (max-width: 1280px) {
   .replica-topbar {
     grid-template-columns: 130px 1fr;

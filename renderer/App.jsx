@@ -3,6 +3,7 @@ const { useEffect, useMemo, useState } = React;
 const NAV_ITEMS = [
   { key: "home", target: "orders", label: "HOME", icon: "home", roles: ["ADMIN", "MANAGER", "CASHIER"] },
   { key: "payment", target: "checkout", label: "PAYMENT", icon: "payment", roles: ["ADMIN", "MANAGER", "CASHIER"] },
+  { key: "credit", target: "credit", label: "CREDIT", icon: "credit", roles: ["ADMIN", "MANAGER", "CASHIER"] },
   { key: "inventory", target: "inventory", label: "INVENTORY", icon: "inventory", roles: ["ADMIN", "MANAGER"] },
   { key: "employees", target: "employees", label: "EMPLOYEE", icon: "employees", roles: ["ADMIN"] },
   { key: "reports", target: "reports", label: "REPORTS", icon: "reports", roles: ["ADMIN", "MANAGER"] },
@@ -34,6 +35,17 @@ function NavIcon({ name }) {
       <svg {...common}>
         <rect x="2" y="5" width="20" height="14" rx="2" />
         <path d="M2 10h20" />
+      </svg>
+    );
+  }
+  if (name === "credit") {
+    return (
+      <svg {...common}>
+        <path d="M4 7h16" />
+        <path d="M4 12h16" />
+        <path d="M4 17h10" />
+        <path d="M18 14v6" />
+        <path d="M15 17h6" />
       </svg>
     );
   }
@@ -237,6 +249,7 @@ function App() {
           {activeScreen === "checkout" && (
             <window.POSComponents.Checkout user={user} selectedOrder={selectedOrder} onPaid={handleOrderPaid} />
           )}
+          {activeScreen === "credit" && <window.POSComponents.CreditRegister user={user} />}
           {activeScreen === "inventory" && <window.POSComponents.Inventory user={user} />}
           {activeScreen === "employees" && <window.POSComponents.Employees user={user} />}
           {activeScreen === "cash" && <window.POSComponents.CashSession user={user} />}

@@ -47,6 +47,38 @@ contextBridge.exposeInMainWorld("posAPI", {
   deleteEmployeeLedgerEntry: (payload) => ipcRenderer.invoke("employee:delete-ledger-entry", payload),
   closeEmployeeCurrentMonth: (payload) => ipcRenderer.invoke("employee:close-current-month", payload),
 
+  listCreditCustomers: () => ipcRenderer.invoke("credit:customers:list"),
+  getCreditCustomer: (payload) => ipcRenderer.invoke("credit:customers:get", payload),
+  createCreditCustomer: (payload) => ipcRenderer.invoke("credit:customers:create", payload),
+  updateCreditCustomer: (payload) => ipcRenderer.invoke("credit:customers:update", payload),
+  deleteCreditCustomer: (payload) => ipcRenderer.invoke("credit:customers:delete", payload),
+
+  listCreditSales: () => ipcRenderer.invoke("credit:sales:list"),
+  listCreditSalesByCustomer: (payload) => ipcRenderer.invoke("credit:sales:by-customer", payload),
+  createCreditSale: (payload) => ipcRenderer.invoke("credit:sales:create", payload),
+
+  listCreditPayments: () => ipcRenderer.invoke("credit:payments:list"),
+  listCreditPaymentsByCustomer: (payload) => ipcRenderer.invoke("credit:payments:by-customer", payload),
+  createCreditPayment: (payload) => ipcRenderer.invoke("credit:payments:create", payload),
+  getCreditCustomerLedger: (payload) => ipcRenderer.invoke("credit:ledger:customer", payload),
+
+  listCreditVendors: () => ipcRenderer.invoke("credit:vendors:list"),
+  getCreditVendor: (payload) => ipcRenderer.invoke("credit:vendors:get", payload),
+  createCreditVendor: (payload) => ipcRenderer.invoke("credit:vendors:create", payload),
+  updateCreditVendor: (payload) => ipcRenderer.invoke("credit:vendors:update", payload),
+  deleteCreditVendor: (payload) => ipcRenderer.invoke("credit:vendors:delete", payload),
+
+  listCreditPurchases: () => ipcRenderer.invoke("credit:purchases:list"),
+  listCreditPurchasesByVendor: (payload) => ipcRenderer.invoke("credit:purchases:by-vendor", payload),
+  createCreditPurchase: (payload) => ipcRenderer.invoke("credit:purchases:create", payload),
+
+  listCreditVendorPayments: () => ipcRenderer.invoke("credit:vendor-payments:list"),
+  listCreditVendorPaymentsByVendor: (payload) => ipcRenderer.invoke("credit:vendor-payments:by-vendor", payload),
+  createCreditVendorPayment: (payload) => ipcRenderer.invoke("credit:vendor-payments:create", payload),
+  getCreditVendorLedger: (payload) => ipcRenderer.invoke("credit:ledger:vendor", payload),
+
+  getCreditDashboardStats: () => ipcRenderer.invoke("credit:dashboard:stats"),
+
 
   getReportSummary: (payload) => ipcRenderer.invoke("reports:summary", payload),
   getProcurementReport: () => ipcRenderer.invoke("reports:procurement"),
@@ -55,6 +87,7 @@ contextBridge.exposeInMainWorld("posAPI", {
 
   printReceipt: (payload) => ipcRenderer.invoke("system:print-receipt", payload),
   openCashDrawer: () => ipcRenderer.invoke("system:open-cash-drawer"),
+  openExternal: (payload) => ipcRenderer.invoke("system:open-external", payload),
   createBackup: (payload) => ipcRenderer.invoke("system:create-backup", payload),
   listBackups: () => ipcRenderer.invoke("system:list-backups"),
   restoreBackup: (payload) => ipcRenderer.invoke("system:restore-backup", payload),

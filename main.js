@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
@@ -165,6 +165,12 @@ const ALL_TABLES = [
   "cash_sessions",
   "cash_transactions",
   "audit_logs",
+  "credit_customers",
+  "credit_sales",
+  "credit_payments",
+  "credit_vendors",
+  "credit_purchases",
+  "credit_vendor_payments",
   "employee_register",
   "employee_ledger",
   "employee_salary_closures"
@@ -501,6 +507,12 @@ async function createDataBackup(userId, mode = "manual") {
     "cash_sessions",
     "cash_transactions",
     "audit_logs",
+    "credit_customers",
+    "credit_sales",
+    "credit_payments",
+    "credit_vendors",
+    "credit_purchases",
+    "credit_vendor_payments",
     "employee_register",
     "employee_ledger",
     "employee_salary_closures"
@@ -550,6 +562,12 @@ async function restoreDataBackup(userId, fileName) {
     "promotions",
     "users",
     "roles",
+    "credit_vendor_payments",
+    "credit_purchases",
+    "credit_vendors",
+    "credit_payments",
+    "credit_sales",
+    "credit_customers",
     "employee_ledger",
     "employee_register",
     "employee_salary_closures"
@@ -570,6 +588,12 @@ async function restoreDataBackup(userId, fileName) {
     "cash_sessions",
     "cash_transactions",
     "audit_logs",
+    "credit_customers",
+    "credit_sales",
+    "credit_payments",
+    "credit_vendors",
+    "credit_purchases",
+    "credit_vendor_payments",
     "employee_register",
     "employee_ledger",
     "employee_salary_closures"
@@ -640,6 +664,92 @@ function summarizeEmployeeRows(employees, ledgerRowsByEmployeeId) {
       }
     };
   });
+}
+
+function normalizeText(v) {
+  const t = String(v || "").trim();
+  return t ? t : null;
+}
+
+function ledgerSort(a, b) {
+  const at = new Date(a.created_at || 0).getTime();
+  const bt = new Date(b.created_at || 0).getTime();
+  if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return at - bt;
+  return Number(a.id || 0) - Number(b.id || 0);
+}
+
+async function buildCustomerLedger(customerId) {
+  const sales = await q("credit_sales", (x) => x.eq("customer_id", customerId));
+  const payments = await q("credit_payments", (x) => x.eq("customer_id", customerId));
+  const rows = [];
+  for (const s of sales) {
+    rows.push({
+      id: `S${s.id}`,
+      source_id: s.id,
+      entry_type: "SALE",
+      debit_cents: Number(s.remaining_cents || 0),
+      credit_cents: 0,
+      total_cents: Number(s.total_cents || 0),
+      paid_cents: Number(s.paid_cents || 0),
+      description: s.description || null,
+      created_at: s.created_at
+    });
+  }
+  for (const p of payments) {
+    rows.push({
+      id: `P${p.id}`,
+      source_id: p.id,
+      entry_type: "PAYMENT",
+      debit_cents: 0,
+      credit_cents: Number(p.amount_cents || 0),
+      note: p.note || null,
+      created_at: p.created_at
+    });
+  }
+  rows.sort(ledgerSort);
+  let balance = 0;
+  const enriched = rows.map((r) => {
+    balance += Number(r.debit_cents || 0) - Number(r.credit_cents || 0);
+    return { ...r, balance_cents: balance };
+  });
+  return enriched;
+}
+
+async function buildVendorLedger(vendorId) {
+  const purchases = await q("credit_purchases", (x) => x.eq("vendor_id", vendorId));
+  const payments = await q("credit_vendor_payments", (x) => x.eq("vendor_id", vendorId));
+  const rows = [];
+  for (const p of purchases) {
+    rows.push({
+      id: `B${p.id}`,
+      source_id: p.id,
+      entry_type: "PURCHASE",
+      debit_cents: Number(p.remaining_cents || 0),
+      credit_cents: 0,
+      total_cents: Number(p.total_cents || 0),
+      paid_cents: Number(p.paid_cents || 0),
+      description: p.description || null,
+      created_at: p.created_at
+    });
+  }
+  for (const p of payments) {
+    rows.push({
+      id: `V${p.id}`,
+      source_id: p.id,
+      entry_type: "PAYMENT",
+      debit_cents: 0,
+      credit_cents: Number(p.amount_cents || 0),
+      note: p.note || null,
+      created_at: p.created_at
+    });
+  }
+  rows.sort(ledgerSort);
+  let balance = 0;
+  const enriched = rows.map((r) => {
+    balance += Number(r.debit_cents || 0) - Number(r.credit_cents || 0);
+    return { ...r, balance_cents: balance };
+  });
+  return enriched;
 }
 
 async function orderItems(orderId) {
@@ -1125,6 +1235,390 @@ function registerIpc() {
     } catch (e) { return { ok: false, error: e.message || "Failed to close salary month." }; }
   });
 
+  ipcMain.handle("credit:customers:list", async () => {
+    try {
+      const rows = await q("credit_customers", (x) => x.order("name", { ascending: true }));
+      return { ok: true, customers: rows };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load customers." }; }
+  });
+
+  ipcMain.handle("credit:customers:get", async (_, p = {}) => {
+    try {
+      const customerId = Number(p.customerId || 0);
+      if (!customerId) return { ok: false, error: "Invalid customer id." };
+      const row = await get("credit_customers", customerId);
+      if (!row) return { ok: false, error: "Customer not found." };
+      return { ok: true, customer: row };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load customer." }; }
+  });
+
+  ipcMain.handle("credit:customers:create", async (_, p = {}) => {
+    try {
+      const name = String(p.name || "").trim();
+      if (!name) return { ok: false, error: "Customer name is required." };
+      const creditLimitCents = Math.round(Number(p.creditLimitCents || 0));
+      if (!Number.isFinite(creditLimitCents) || creditLimitCents < 0) return { ok: false, error: "Invalid credit limit." };
+      const row = await ins("credit_customers", {
+        name,
+        phone: normalizeText(p.phone),
+        address: normalizeText(p.address),
+        credit_limit_cents: creditLimitCents,
+        current_balance_cents: 0,
+        notes: normalizeText(p.notes),
+        created_at: now()
+      });
+      await audit(p.userId || null, "CREDIT_CUSTOMER_CREATED", { customerId: row.id });
+      return { ok: true, id: row.id };
+    } catch (e) { return { ok: false, error: e.message || "Failed to create customer." }; }
+  });
+
+  ipcMain.handle("credit:customers:update", async (_, p = {}) => {
+    try {
+      const customerId = Number(p.customerId || 0);
+      if (!customerId) return { ok: false, error: "Invalid customer id." };
+      const customer = await get("credit_customers", customerId);
+      if (!customer) return { ok: false, error: "Customer not found." };
+      const patch = { updated_at: now() };
+      if (p.name != null) {
+        const name = String(p.name || "").trim();
+        if (!name) return { ok: false, error: "Customer name is required." };
+        patch.name = name;
+      }
+      if (p.phone != null) patch.phone = normalizeText(p.phone);
+      if (p.address != null) patch.address = normalizeText(p.address);
+      if (p.creditLimitCents != null) {
+        const creditLimitCents = Math.round(Number(p.creditLimitCents || 0));
+        if (!Number.isFinite(creditLimitCents) || creditLimitCents < 0) return { ok: false, error: "Invalid credit limit." };
+        patch.credit_limit_cents = creditLimitCents;
+      }
+      if (p.notes != null) patch.notes = normalizeText(p.notes);
+      await upd("credit_customers", (x) => x.eq("id", customerId), patch);
+      await audit(p.userId || null, "CREDIT_CUSTOMER_UPDATED", { customerId });
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message || "Failed to update customer." }; }
+  });
+
+  ipcMain.handle("credit:customers:delete", async (_, p = {}) => {
+    try {
+      const customerId = Number(p.customerId || 0);
+      if (!customerId) return { ok: false, error: "Invalid customer id." };
+      const customer = await get("credit_customers", customerId);
+      if (!customer) return { ok: false, error: "Customer not found." };
+      const sales = await q("credit_sales", (x) => x.eq("customer_id", customerId).limit(1));
+      const payments = await q("credit_payments", (x) => x.eq("customer_id", customerId).limit(1));
+      if (sales.length || payments.length || Number(customer.current_balance_cents || 0) !== 0) {
+        return { ok: false, error: "Cannot delete customer with balance or transactions." };
+      }
+      await del("credit_customers", (x) => x.eq("id", customerId));
+      await audit(p.userId || null, "CREDIT_CUSTOMER_DELETED", { customerId });
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message || "Failed to delete customer." }; }
+  });
+
+  ipcMain.handle("credit:sales:list", async () => {
+    try {
+      const rows = await q("credit_sales", (x) => x.order("id", { ascending: false }).limit(5000));
+      return { ok: true, sales: rows };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load sales." }; }
+  });
+
+  ipcMain.handle("credit:sales:by-customer", async (_, p = {}) => {
+    try {
+      const customerId = Number(p.customerId || 0);
+      if (!customerId) return { ok: false, error: "Invalid customer id." };
+      const rows = await q("credit_sales", (x) => x.eq("customer_id", customerId).order("id", { ascending: false }).limit(5000));
+      return { ok: true, sales: rows };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load sales." }; }
+  });
+
+  ipcMain.handle("credit:sales:create", async (_, p = {}) => {
+    try {
+      const customerId = Number(p.customerId || 0);
+      if (!customerId) return { ok: false, error: "Invalid customer id." };
+      const customer = await get("credit_customers", customerId);
+      if (!customer) return { ok: false, error: "Customer not found." };
+      const totalCents = Math.round(Number(p.totalCents || 0));
+      const paidCents = Math.round(Number(p.paidCents || 0));
+      if (!Number.isFinite(totalCents) || totalCents <= 0) return { ok: false, error: "Total amount must be positive." };
+      if (!Number.isFinite(paidCents) || paidCents < 0 || paidCents > totalCents) return { ok: false, error: "Invalid paid amount." };
+      const remainingCents = Math.max(0, totalCents - paidCents);
+      const row = await ins("credit_sales", {
+        customer_id: customerId,
+        total_cents: totalCents,
+        paid_cents: paidCents,
+        remaining_cents: remainingCents,
+        description: normalizeText(p.description),
+        created_at: now()
+      });
+      if (remainingCents > 0) {
+        const nextBalance = Number(customer.current_balance_cents || 0) + remainingCents;
+        await upd("credit_customers", (x) => x.eq("id", customerId), { current_balance_cents: nextBalance, updated_at: now() });
+      }
+      await audit(p.userId || null, "CREDIT_SALE_CREATED", { customerId, saleId: row.id, remainingCents });
+      return { ok: true, id: row.id, remainingCents };
+    } catch (e) { return { ok: false, error: e.message || "Failed to create sale." }; }
+  });
+
+  ipcMain.handle("credit:payments:list", async () => {
+    try {
+      const rows = await q("credit_payments", (x) => x.order("id", { ascending: false }).limit(5000));
+      return { ok: true, payments: rows };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load payments." }; }
+  });
+
+  ipcMain.handle("credit:payments:by-customer", async (_, p = {}) => {
+    try {
+      const customerId = Number(p.customerId || 0);
+      if (!customerId) return { ok: false, error: "Invalid customer id." };
+      const rows = await q("credit_payments", (x) => x.eq("customer_id", customerId).order("id", { ascending: false }).limit(5000));
+      return { ok: true, payments: rows };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load payments." }; }
+  });
+
+  ipcMain.handle("credit:payments:create", async (_, p = {}) => {
+    try {
+      const customerId = Number(p.customerId || 0);
+      if (!customerId) return { ok: false, error: "Invalid customer id." };
+      const customer = await get("credit_customers", customerId);
+      if (!customer) return { ok: false, error: "Customer not found." };
+      const amountCents = Math.round(Number(p.amountCents || 0));
+      if (!Number.isFinite(amountCents) || amountCents <= 0) return { ok: false, error: "Amount must be positive." };
+      const current = Number(customer.current_balance_cents || 0);
+      if (current <= 0) return { ok: false, error: "Customer has no outstanding balance." };
+      if (amountCents > current) return { ok: false, error: "Payment exceeds current balance." };
+      const row = await ins("credit_payments", {
+        customer_id: customerId,
+        amount_cents: amountCents,
+        note: normalizeText(p.note),
+        created_at: now()
+      });
+      await upd("credit_customers", (x) => x.eq("id", customerId), { current_balance_cents: current - amountCents, updated_at: now() });
+      await audit(p.userId || null, "CREDIT_PAYMENT_CREATED", { customerId, paymentId: row.id, amountCents });
+      return { ok: true, id: row.id };
+    } catch (e) { return { ok: false, error: e.message || "Failed to create payment." }; }
+  });
+
+  ipcMain.handle("credit:ledger:customer", async (_, p = {}) => {
+    try {
+      const customerId = Number(p.customerId || 0);
+      if (!customerId) return { ok: false, error: "Invalid customer id." };
+      const customer = await get("credit_customers", customerId);
+      if (!customer) return { ok: false, error: "Customer not found." };
+      const ledger = await buildCustomerLedger(customerId);
+      return { ok: true, customer, ledger };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load ledger." }; }
+  });
+
+  ipcMain.handle("credit:vendors:list", async () => {
+    try {
+      const rows = await q("credit_vendors", (x) => x.order("name", { ascending: true }));
+      return { ok: true, vendors: rows };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load vendors." }; }
+  });
+
+  ipcMain.handle("credit:vendors:get", async (_, p = {}) => {
+    try {
+      const vendorId = Number(p.vendorId || 0);
+      if (!vendorId) return { ok: false, error: "Invalid vendor id." };
+      const row = await get("credit_vendors", vendorId);
+      if (!row) return { ok: false, error: "Vendor not found." };
+      return { ok: true, vendor: row };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load vendor." }; }
+  });
+
+  ipcMain.handle("credit:vendors:create", async (_, p = {}) => {
+    try {
+      const name = String(p.name || "").trim();
+      if (!name) return { ok: false, error: "Vendor name is required." };
+      const row = await ins("credit_vendors", {
+        name,
+        phone: normalizeText(p.phone),
+        address: normalizeText(p.address),
+        current_balance_cents: 0,
+        notes: normalizeText(p.notes),
+        created_at: now()
+      });
+      await audit(p.userId || null, "CREDIT_VENDOR_CREATED", { vendorId: row.id });
+      return { ok: true, id: row.id };
+    } catch (e) { return { ok: false, error: e.message || "Failed to create vendor." }; }
+  });
+
+  ipcMain.handle("credit:vendors:update", async (_, p = {}) => {
+    try {
+      const vendorId = Number(p.vendorId || 0);
+      if (!vendorId) return { ok: false, error: "Invalid vendor id." };
+      const vendor = await get("credit_vendors", vendorId);
+      if (!vendor) return { ok: false, error: "Vendor not found." };
+      const patch = { updated_at: now() };
+      if (p.name != null) {
+        const name = String(p.name || "").trim();
+        if (!name) return { ok: false, error: "Vendor name is required." };
+        patch.name = name;
+      }
+      if (p.phone != null) patch.phone = normalizeText(p.phone);
+      if (p.address != null) patch.address = normalizeText(p.address);
+      if (p.notes != null) patch.notes = normalizeText(p.notes);
+      await upd("credit_vendors", (x) => x.eq("id", vendorId), patch);
+      await audit(p.userId || null, "CREDIT_VENDOR_UPDATED", { vendorId });
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message || "Failed to update vendor." }; }
+  });
+
+  ipcMain.handle("credit:vendors:delete", async (_, p = {}) => {
+    try {
+      const vendorId = Number(p.vendorId || 0);
+      if (!vendorId) return { ok: false, error: "Invalid vendor id." };
+      const vendor = await get("credit_vendors", vendorId);
+      if (!vendor) return { ok: false, error: "Vendor not found." };
+      const purchases = await q("credit_purchases", (x) => x.eq("vendor_id", vendorId).limit(1));
+      const payments = await q("credit_vendor_payments", (x) => x.eq("vendor_id", vendorId).limit(1));
+      if (purchases.length || payments.length || Number(vendor.current_balance_cents || 0) !== 0) {
+        return { ok: false, error: "Cannot delete vendor with balance or transactions." };
+      }
+      await del("credit_vendors", (x) => x.eq("id", vendorId));
+      await audit(p.userId || null, "CREDIT_VENDOR_DELETED", { vendorId });
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message || "Failed to delete vendor." }; }
+  });
+
+  ipcMain.handle("credit:purchases:list", async () => {
+    try {
+      const rows = await q("credit_purchases", (x) => x.order("id", { ascending: false }).limit(5000));
+      return { ok: true, purchases: rows };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load purchases." }; }
+  });
+
+  ipcMain.handle("credit:purchases:by-vendor", async (_, p = {}) => {
+    try {
+      const vendorId = Number(p.vendorId || 0);
+      if (!vendorId) return { ok: false, error: "Invalid vendor id." };
+      const rows = await q("credit_purchases", (x) => x.eq("vendor_id", vendorId).order("id", { ascending: false }).limit(5000));
+      return { ok: true, purchases: rows };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load purchases." }; }
+  });
+
+  ipcMain.handle("credit:purchases:create", async (_, p = {}) => {
+    try {
+      const vendorId = Number(p.vendorId || 0);
+      if (!vendorId) return { ok: false, error: "Invalid vendor id." };
+      const vendor = await get("credit_vendors", vendorId);
+      if (!vendor) return { ok: false, error: "Vendor not found." };
+      const totalCents = Math.round(Number(p.totalCents || 0));
+      const paidCents = Math.round(Number(p.paidCents || 0));
+      if (!Number.isFinite(totalCents) || totalCents <= 0) return { ok: false, error: "Total amount must be positive." };
+      if (!Number.isFinite(paidCents) || paidCents < 0 || paidCents > totalCents) return { ok: false, error: "Invalid paid amount." };
+      const remainingCents = Math.max(0, totalCents - paidCents);
+      const row = await ins("credit_purchases", {
+        vendor_id: vendorId,
+        total_cents: totalCents,
+        paid_cents: paidCents,
+        remaining_cents: remainingCents,
+        description: normalizeText(p.description),
+        created_at: now()
+      });
+      if (remainingCents > 0) {
+        const nextBalance = Number(vendor.current_balance_cents || 0) + remainingCents;
+        await upd("credit_vendors", (x) => x.eq("id", vendorId), { current_balance_cents: nextBalance, updated_at: now() });
+      }
+      await audit(p.userId || null, "CREDIT_PURCHASE_CREATED", { vendorId, purchaseId: row.id, remainingCents });
+      return { ok: true, id: row.id, remainingCents };
+    } catch (e) { return { ok: false, error: e.message || "Failed to create purchase." }; }
+  });
+
+  ipcMain.handle("credit:vendor-payments:list", async () => {
+    try {
+      const rows = await q("credit_vendor_payments", (x) => x.order("id", { ascending: false }).limit(5000));
+      return { ok: true, payments: rows };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load vendor payments." }; }
+  });
+
+  ipcMain.handle("credit:vendor-payments:by-vendor", async (_, p = {}) => {
+    try {
+      const vendorId = Number(p.vendorId || 0);
+      if (!vendorId) return { ok: false, error: "Invalid vendor id." };
+      const rows = await q("credit_vendor_payments", (x) => x.eq("vendor_id", vendorId).order("id", { ascending: false }).limit(5000));
+      return { ok: true, payments: rows };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load vendor payments." }; }
+  });
+
+  ipcMain.handle("credit:vendor-payments:create", async (_, p = {}) => {
+    try {
+      const vendorId = Number(p.vendorId || 0);
+      if (!vendorId) return { ok: false, error: "Invalid vendor id." };
+      const vendor = await get("credit_vendors", vendorId);
+      if (!vendor) return { ok: false, error: "Vendor not found." };
+      const amountCents = Math.round(Number(p.amountCents || 0));
+      if (!Number.isFinite(amountCents) || amountCents <= 0) return { ok: false, error: "Amount must be positive." };
+      const current = Number(vendor.current_balance_cents || 0);
+      if (current <= 0) return { ok: false, error: "Vendor has no outstanding balance." };
+      if (amountCents > current) return { ok: false, error: "Payment exceeds current balance." };
+      const row = await ins("credit_vendor_payments", {
+        vendor_id: vendorId,
+        amount_cents: amountCents,
+        note: normalizeText(p.note),
+        created_at: now()
+      });
+      await upd("credit_vendors", (x) => x.eq("id", vendorId), { current_balance_cents: current - amountCents, updated_at: now() });
+      await audit(p.userId || null, "CREDIT_VENDOR_PAYMENT_CREATED", { vendorId, paymentId: row.id, amountCents });
+      return { ok: true, id: row.id };
+    } catch (e) { return { ok: false, error: e.message || "Failed to create vendor payment." }; }
+  });
+
+  ipcMain.handle("credit:ledger:vendor", async (_, p = {}) => {
+    try {
+      const vendorId = Number(p.vendorId || 0);
+      if (!vendorId) return { ok: false, error: "Invalid vendor id." };
+      const vendor = await get("credit_vendors", vendorId);
+      if (!vendor) return { ok: false, error: "Vendor not found." };
+      const ledger = await buildVendorLedger(vendorId);
+      return { ok: true, vendor, ledger };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load vendor ledger." }; }
+  });
+
+  ipcMain.handle("credit:dashboard:stats", async () => {
+    try {
+      const customers = await q("credit_customers", (x) => x.order("name", { ascending: true }));
+      const vendors = await q("credit_vendors", (x) => x.order("name", { ascending: true }));
+      const sales = await q("credit_sales", (x) => x.order("id", { ascending: false }).limit(5000));
+      const payments = await q("credit_payments", (x) => x.order("id", { ascending: false }).limit(5000));
+      const purchases = await q("credit_purchases", (x) => x.order("id", { ascending: false }).limit(5000));
+      const vendorPayments = await q("credit_vendor_payments", (x) => x.order("id", { ascending: false }).limit(5000));
+
+      const customerOutstandingTotal = customers.reduce((a, c) => a + Math.max(0, Number(c.current_balance_cents || 0)), 0);
+      const customerDueCount = customers.filter((c) => Number(c.current_balance_cents || 0) > 0).length;
+      const vendorPayableTotal = vendors.reduce((a, v) => a + Math.max(0, Number(v.current_balance_cents || 0)), 0);
+
+      const todaySalesTotal = sales.filter((s) => isToday(s.created_at)).reduce((a, s) => a + Number(s.total_cents || 0), 0);
+      const todayPaymentsTotal = payments.filter((p) => isToday(p.created_at)).reduce((a, p) => a + Number(p.amount_cents || 0), 0);
+      const todayPurchasesTotal = purchases.filter((p) => isToday(p.created_at)).reduce((a, p) => a + Number(p.total_cents || 0), 0);
+      const todayVendorPaymentsTotal = vendorPayments.filter((p) => isToday(p.created_at)).reduce((a, p) => a + Number(p.amount_cents || 0), 0);
+
+      const topCustomers = customers
+        .filter((c) => Number(c.current_balance_cents || 0) > 0)
+        .sort((a, b) => Number(b.current_balance_cents || 0) - Number(a.current_balance_cents || 0))
+        .slice(0, 5);
+      const topVendors = vendors
+        .filter((v) => Number(v.current_balance_cents || 0) > 0)
+        .sort((a, b) => Number(b.current_balance_cents || 0) - Number(a.current_balance_cents || 0))
+        .slice(0, 5);
+
+      return {
+        ok: true,
+        stats: {
+          customerOutstandingTotal,
+          customerDueCount,
+          todaySalesTotal,
+          todayPaymentsTotal,
+          vendorPayableTotal,
+          todayPurchasesTotal,
+          todayVendorPaymentsTotal,
+          topCustomers,
+          topVendors
+        }
+      };
+    } catch (e) { return { ok: false, error: e.message || "Failed to load credit dashboard." }; }
+  });
+
 
   ipcMain.handle("reports:summary", async (_, p) => {
     try {
@@ -1191,6 +1685,14 @@ function registerIpc() {
 
   ipcMain.handle("system:print-receipt", async (_, p) => { try { const o = await get("orders", p.orderId); if (!o) return { ok: false, error: "Order not found." }; const fp = await receiptPdf(p.orderId); await audit(null, "RECEIPT_PRINT_REQUESTED", { orderId: p.orderId, receiptPath: fp }); return { ok: true, message: "Receipt generated.", receiptPath: fp }; } catch (e) { return { ok: false, error: e.message || "Failed." }; } });
   ipcMain.handle("system:open-cash-drawer", async () => { await audit(null, "CASH_DRAWER_OPENED", {}); return { ok: true, message: "Cash drawer signal triggered (simulated)." }; });
+  ipcMain.handle("system:open-external", async (_, p = {}) => {
+    try {
+      const url = String(p.url || "").trim();
+      if (!url) return { ok: false, error: "Invalid URL." };
+      await shell.openExternal(url);
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message || "Failed to open URL." }; }
+  });
   ipcMain.handle("system:create-backup", async (_, p = {}) => { try { if (!(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can create backup." }; const x = await createDataBackup(p.userId || null, "manual"); return { ok: true, ...x }; } catch (e) { return { ok: false, error: e.message || "Failed to create backup." }; } });
   ipcMain.handle("system:list-backups", async () => { try { return { ok: true, backups: listBackupFiles() }; } catch (e) { return { ok: false, error: e.message || "Failed to list backups." }; } });
   ipcMain.handle("system:restore-backup", async (_, p = {}) => { try { if (!(await isMgr(p.userId))) return { ok: false, error: "Only admin/manager can restore backup." }; const x = await restoreDataBackup(p.userId || null, p.fileName); return { ok: true, ...x }; } catch (e) { return { ok: false, error: e.message || "Failed to restore backup." }; } });
