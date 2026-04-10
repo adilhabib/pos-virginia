@@ -409,265 +409,346 @@
     const mobileLabel = customerPhone.trim() ? customerPhone.trim() : "-";
 
     return (
-      <div className="menu-replica-layout">
-        <section className="menu-canvas">
+      <div className="flex flex-col lg:flex-row h-full gap-6 p-2">
+        {/* Main Menu Area */}
+        <section className="flex-1 flex flex-col min-w-0">
           {canManageMenu && (
-            <div className="card">
-              <div className="row">
-                <strong>Menu Management</strong>
-                <button onClick={() => setShowEditor((v) => !v)}>{showEditor ? "Hide Editor" : "Edit Menu"}</button>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="font-bold text-gray-800">Menu Management</h3>
+                <button 
+                  onClick={() => setShowEditor((v) => !v)}
+                  className="text-teal-600 font-semibold text-sm hover:underline"
+                >
+                  {showEditor ? "Hide Editor" : "Edit Menu"}
+                </button>
               </div>
               {showEditor && (
-                <>
-                  <div className="row">
-                    <input placeholder="New item name" value={newName} onChange={(e) => setNewName(e.target.value)} />
-                    <select value={newCategory} onChange={(e) => setNewCategory(e.target.value)}>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <input className="px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm" placeholder="New item name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+                    <select className="px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm" value={newCategory} onChange={(e) => setNewCategory(e.target.value)}>
                       <option value="">Select category</option>
                       {categoryOptions.map((c) => <option key={`new-cat-${c}`} value={c}>{c}</option>)}
-                      <option value={ADD_NEW_CATEGORY}>Add new Category</option>
+                      <option value={ADD_NEW_CATEGORY}>+ Add new Category</option>
                     </select>
                     {newCategory === ADD_NEW_CATEGORY && (
                       <input
+                        className="px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm"
                         placeholder="New category name"
                         value={newCategoryCustom}
                         onChange={(e) => setNewCategoryCustom(e.target.value)}
                       />
                     )}
                     <input
-                      placeholder="Size (optional, e.g. Small:300, Medium:450)"
+                      className="px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm"
+                      placeholder="Size (e.g. Small:300)"
                       value={newSize}
                       onChange={(e) => setNewSize(e.target.value)}
                     />
-                    <input placeholder="Price" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} />
-                    <select value={newActive ? "1" : "0"} onChange={(e) => setNewActive(e.target.value === "1")}>
+                    <input className="px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm" placeholder="Price" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} />
+                    <select className="px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm" value={newActive ? "1" : "0"} onChange={(e) => setNewActive(e.target.value === "1")}>
                       <option value="1">Active</option>
                       <option value="0">Inactive</option>
                     </select>
-                    <button className="primary" onClick={createMenuItem}>Add Item</button>
+                    <button className="bg-teal-600 text-white font-bold py-2 rounded-lg text-sm hover:bg-teal-700 transition-colors" onClick={createMenuItem}>Add Item</button>
                   </div>
-                  <table className="table">
-                    <thead>
-                      <tr><th>Name</th><th>Category</th><th>Size</th><th>Price</th><th>Status</th><th></th><th></th></tr>
-                    </thead>
-                    <tbody>
-                      {menu.map((item) => (
-                        <tr key={item.id}>
-                          <td>{item.name}</td>
-                          <td>{item.category}</td>
-                          <td>{item.size || "-"}</td>
-                          <td>{money(item.price_cents)}</td>
-                          <td>{item.active ? "Active" : "Inactive"}</td>
-                          <td><button onClick={() => beginEdit(item)}>Edit</button></td>
-                          <td><button onClick={() => toggleActive(item)}>{item.active ? "Deactivate" : "Activate"}</button></td>
+                  
+                  <div className="overflow-x-auto rounded-lg border border-gray-50">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-gray-50 text-gray-500 uppercase text-[10px] font-bold">
+                        <tr>
+                          <th className="px-4 py-3">Name</th>
+                          <th className="px-4 py-3">Category</th>
+                          <th className="px-4 py-3">Size</th>
+                          <th className="px-4 py-3">Price</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {menu.map((item) => (
+                          <tr key={item.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 font-medium">{item.name}</td>
+                            <td className="px-4 py-3">{item.category}</td>
+                            <td className="px-4 py-3">{item.size || "-"}</td>
+                            <td className="px-4 py-3 font-bold">{money(item.price_cents)}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${item.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                {item.active ? "Active" : "Inactive"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 flex gap-2">
+                              <button onClick={() => beginEdit(item)} className="text-teal-600 hover:text-teal-800 font-bold">Edit</button>
+                              <button onClick={() => toggleActive(item)} className="text-gray-400 hover:text-gray-600 font-bold">{item.active ? "Deactivate" : "Activate"}</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
 
                   {editId && (
-                    <div className="card">
-                      <h3>Edit Menu Item #{editId}</h3>
-                      <div className="row">
-                        <input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                        <select value={editCategory} onChange={(e) => setEditCategory(e.target.value)}>
+                    <div className="p-4 bg-teal-50 rounded-xl border border-teal-100 mt-4">
+                      <h4 className="font-bold text-teal-800 mb-3 text-sm uppercase">Editing Item #{editId}</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <input className="px-3 py-2 bg-white border border-teal-100 rounded-lg text-sm" value={editName} onChange={(e) => setEditName(e.target.value)} />
+                        <select className="px-3 py-2 bg-white border border-teal-100 rounded-lg text-sm" value={editCategory} onChange={(e) => setEditCategory(e.target.value)}>
                           <option value="">Select category</option>
                           {categoryOptions.map((c) => <option key={`edit-cat-${c}`} value={c}>{c}</option>)}
                           <option value={ADD_NEW_CATEGORY}>Add new Category</option>
                         </select>
-                        {editCategory === ADD_NEW_CATEGORY && (
-                          <input
-                            placeholder="New category name"
-                            value={editCategoryCustom}
-                            onChange={(e) => setEditCategoryCustom(e.target.value)}
-                          />
-                        )}
-                        <input placeholder="Size (optional)" value={editSize} onChange={(e) => setEditSize(e.target.value)} />
-                        <input value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
-                        <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
-                          <option value="1">Active</option>
-                          <option value="0">Inactive</option>
-                        </select>
-                        <button onClick={() => setEditId("")}>Cancel</button>
-                        <button className="primary" onClick={saveMenuItem}>Save</button>
+                        <input className="px-3 py-2 bg-white border border-teal-100 rounded-lg text-sm" value={editSize} onChange={(e) => setEditSize(e.target.value)} />
+                        <input className="px-3 py-2 bg-white border border-teal-100 rounded-lg text-sm" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
+                        <div className="flex gap-2">
+                          <button onClick={() => setEditId("")} className="flex-1 py-2 rounded-lg border border-teal-200 text-teal-700 font-bold text-sm bg-white">Cancel</button>
+                          <button className="flex-1 py-2 rounded-lg bg-teal-600 text-white font-bold text-sm hover:bg-teal-700" onClick={saveMenuItem}>Save</button>
+                        </div>
                       </div>
                     </div>
                   )}
-                </>
+                </div>
               )}
             </div>
           )}
 
-          <div className="course-tabs">
+          {/* Category Tabs */}
+          <div className="flex gap-2 mb-6 overflow-x-auto pb-2 scrollbar-hide">
             {tabs.map((tab) => (
-              <button key={tab} className={activeTab === tab ? "course-tab active" : "course-tab"} onClick={() => setActiveTab(tab)}>
+              <button 
+                key={tab} 
+                className={`flex-shrink-0 px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${
+                  activeTab === tab 
+                    ? "bg-teal-600 text-white shadow-lg shadow-teal-100" 
+                    : "bg-white text-gray-500 hover:bg-teal-50 hover:text-teal-600 border border-gray-100"
+                }`} 
+                onClick={() => setActiveTab(tab)}
+              >
                 {tab}
               </button>
             ))}
           </div>
+
           {activeTab !== "ALL" && sizeTabs.length > 0 && (
-            <div className="size-tabs">
+            <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
               {sizeTabs.map((tab) => (
-                <button key={tab} className={activeSize === tab ? "size-tab active" : "size-tab"} onClick={() => setActiveSize(tab)}>
+                <button 
+                  key={tab} 
+                  className={`flex-shrink-0 px-4 py-1.5 rounded-lg font-bold text-xs transition-all ${
+                    activeSize === tab 
+                      ? "bg-gray-800 text-white" 
+                      : "bg-gray-100 text-gray-400 hover:bg-gray-200"
+                  }`} 
+                  onClick={() => setActiveSize(tab)}
+                >
                   {tab === ALL_SIZES ? "All Sizes" : tab}
                 </button>
               ))}
             </div>
           )}
 
-          <div className="menu-grid-replica">
+          {/* Menu Items Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 overflow-y-auto pr-2">
             {loading ? (
-              <div className="card"><p className="muted">Loading...</p></div>
+              <div className="col-span-full py-12 flex justify-center text-gray-400 font-medium">Loading menu...</div>
             ) : (
               visibleMenu.map((item) => (
-                <button key={item.id} className="food-replica-card" onClick={() => addItem(item.id)}>
-                  <div className="food-photo" title={item.category || ""}>{categoryIcon(item.category)}</div>
-                  <div className="food-title">{item.name}</div>
-                  <div className="food-cat-line">
-                    <span>CATEGORY:</span>
-                    <i>{item.category || "-"}</i>
+                <button 
+                  key={item.id} 
+                  className="group bg-white rounded-2xl p-3 border border-gray-100 shadow-sm hover:shadow-xl hover:border-teal-200 transition-all text-left flex flex-col items-center" 
+                  onClick={() => addItem(item.id)}
+                >
+                  <div 
+                    className="w-full aspect-square rounded-xl flex items-center justify-center text-4xl mb-3 shadow-inner group-hover:scale-105 transition-transform" 
+                    style={imageStyleFromName(item.name)}
+                    title={item.category || ""}
+                  >
+                    {categoryIcon(item.category)}
                   </div>
-                  {item.size && (
-                    <div className="food-size-line">
-                      <span>SIZE:</span>
-                      <i>{item.size}</i>
+                  <div className="w-full px-1">
+                    <div className="font-bold text-gray-800 text-base truncate mb-0.5">{item.name}</div>
+                    <div className="flex justify-between items-center mt-1">
+                      <span className="text-[10px] uppercase font-extrabold text-gray-300 trekking-widest">{item.size || (item.category === activeTab ? "" : item.category)}</span>
+                      <span className="text-teal-600 font-extrabold text-sm">{money(item.price_cents)}</span>
                     </div>
-                  )}
+                  </div>
                 </button>
               ))
             )}
           </div>
         </section>
 
-        <aside className="order-summary-replica">
-          <div className="summary-top">
-            <h2>ORDER #</h2>
-            <strong>{orderId || "----"}</strong>
-          </div>
-          <div className="summary-meta">
-            <span>GUEST: <b>{guestLabel}</b></span>
-            <span>MOBILE: <b>{mobileLabel}</b></span>
-            {/* <span>TABLE: <b>1</b></span> */}
-          </div>
-          <div className="customer-fields">
-            <input
-              placeholder="Customer Name (optional)"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              onBlur={saveCustomerIfPossible}
-            />
-            <input
-              placeholder="Customer Phone (optional)"
-              value={customerPhone}
-              onChange={(e) => setCustomerPhone(e.target.value)}
-              onBlur={saveCustomerIfPossible}
-            />
-          </div>
-          <div className="summary-discount-controls">
-            <span>DYNAMIC DISCOUNT</span>
-            <div className="row">
-              <select value={discountMode} onChange={(e) => setDiscountMode(e.target.value)}>
-                <option value="amount">Amount</option>
-                <option value="percent">Percent (%)</option>
-              </select>
+        {/* Right Sidebar - Order Summary */}
+        <aside className="w-full lg:w-[400px] flex flex-col bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
+          <div className="p-6 bg-gray-50 flex flex-col">
+            <div className="flex justify-between items-end mb-4">
+              <div>
+                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Order ID</h4>
+                <div className="text-3xl font-black text-gray-900">#{orderId || "----"}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-teal-600 font-black text-4xl mb-1">{money(total)}</div>
+                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Payable</div>
+              </div>
+            </div>
+            
+            <div className="customer-info space-y-2 mt-4">
               <input
-                value={discountValue}
-                onChange={(e) => setDiscountValue(e.target.value)}
-                placeholder={discountMode === "percent" ? "10" : "100.00"}
+                className="w-full px-4 py-2.5 bg-white border border-gray-100 rounded-xl text-sm focus:ring-2 focus:ring-teal-500 outline-none"
+                placeholder="Customer Name"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                onBlur={saveCustomerIfPossible}
               />
-              <button onClick={applyDiscount}>Apply</button>
+              <input
+                className="w-full px-4 py-2.5 bg-white border border-gray-100 rounded-xl text-sm focus:ring-2 focus:ring-teal-500 outline-none"
+                placeholder="Mobile Number"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                onBlur={saveCustomerIfPossible}
+              />
             </div>
           </div>
 
-          <div className="summary-discount-controls">
-            <span>PROMO CODE</span>
-            <div className="row">
-              <input
-                value={promoCodeInput}
-                onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
-                placeholder="Enter promo code"
-              />
-              <button onClick={applyPromoCode}>Apply</button>
-              <button onClick={clearPromoCode} disabled={!orderId || !activePromoCode}>Clear</button>
-            </div>
-            <div className="muted">Active: {activePromoCode || "Auto/None"}</div>
-            <div className="muted">
-              Available:{" "}
-              {promotions
-                .filter((p) => p.code)
-                .map((p) => p.code)
-                .join(", ") || "-"}
-            </div>
-          </div>
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {/* Promotions & Discounts */}
+            <div className="space-y-4">
+              <div className="p-4 bg-yellow-50/50 rounded-2xl border border-yellow-100">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[10px] font-bold text-yellow-700 uppercase tracking-widest">Add Discount</span>
+                  <div className="flex bg-white rounded-lg p-0.5 border border-yellow-200">
+                    <button onClick={() => setDiscountMode("amount")} className={`px-2 py-0.5 text-[9px] font-bold rounded ${discountMode === "amount" ? "bg-yellow-500 text-white" : "text-gray-400"}`}>$</button>
+                    <button onClick={() => setDiscountMode("percent")} className={`px-2 py-0.5 text-[9px] font-bold rounded ${discountMode === "percent" ? "bg-yellow-500 text-white" : "text-gray-400"}`}>%</button>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 px-3 py-1.5 bg-white border border-yellow-200 rounded-lg text-sm font-bold"
+                    value={discountValue}
+                    onChange={(e) => setDiscountValue(e.target.value)}
+                    placeholder={discountMode === "percent" ? "10%" : "0.00"}
+                  />
+                  <button onClick={applyDiscount} className="bg-yellow-500 text-white px-4 py-1.5 rounded-lg font-bold text-xs">Apply</button>
+                </div>
+              </div>
 
-          <div className="open-orders-panel">
-            <div className="open-orders-head">
-              <strong>OPEN / HOLD ORDERS</strong>
-              <button onClick={loadOpenOrders}>Refresh</button>
+              <div className="p-4 bg-teal-50/50 rounded-2xl border border-teal-100">
+                <span className="text-[10px] font-bold text-teal-700 uppercase tracking-widest mb-3 block">Promo Code</span>
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 px-3 py-1.5 bg-white border border-teal-200 rounded-lg text-sm font-bold placeholder:text-gray-300"
+                    value={promoCodeInput}
+                    onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                    placeholder="VIRGINIA20"
+                  />
+                  <button onClick={applyPromoCode} className="bg-teal-600 text-white px-4 py-1.5 rounded-lg font-bold text-xs">GO</button>
+                  {activePromoCode && (
+                    <button onClick={clearPromoCode} className="text-red-400 font-bold px-1 hover:text-red-600">×</button>
+                  )}
+                </div>
+                {activePromoCode && <div className="mt-2 text-[10px] font-bold text-teal-600">Active Code: {activePromoCode}</div>}
+              </div>
             </div>
-            <div className="open-orders-list">
-              {openOrders.length === 0 ? (
-                <p className="muted">No open orders.</p>
+
+            {/* Open Orders */}
+            <div className="space-y-2">
+               <div className="flex justify-between items-center mb-1">
+                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">On Hold / Queued</span>
+                 <button onClick={loadOpenOrders} className="text-[10px] font-bold text-teal-600 hover:underline">Refresh</button>
+               </div>
+               <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-invisible">
+                 {openOrders.map((row) => (
+                   <button
+                     key={row.id}
+                     className={`flex-shrink-0 flex flex-col p-3 rounded-2xl border transition-all ${orderId === row.id ? "bg-teal-600 border-teal-600 text-white shadow-lg" : "bg-white border-gray-100 text-gray-600 hover:border-teal-300"}`}
+                     onClick={() => recallOrder(row.id)}
+                   >
+                     <span className="text-xs font-black mb-1">#{row.id}</span>
+                     <span className="text-[9px] font-bold uppercase opacity-70 mb-2">{row.status}</span>
+                     <span className="text-[10px] font-black">{money(row.total_cents || 0)}</span>
+                   </button>
+                 ))}
+               </div>
+            </div>
+
+            {/* Cart Items */}
+            <div className="space-y-3">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-2">Cart Items ({billItems.length})</span>
+              {billItems.length === 0 ? (
+                <div className="py-8 text-center text-gray-300 italic text-sm">Empty cart</div>
               ) : (
-                openOrders.map((row) => (
-                  <button
-                    key={row.id}
-                    className={orderId === row.id ? "open-order-chip active" : "open-order-chip"}
-                    onClick={() => recallOrder(row.id)}
-                  >
-                    <span>#{row.id}</span>
-                    <span>{row.status}</span>
-                    <span>{row.item_count} item(s)</span>
-                    <span>{money(row.total_cents || 0)}</span>
-                  </button>
+                billItems.map((item) => (
+                  <div key={item.id} className="flex gap-4 group">
+                    <div className="w-14 h-14 rounded-xl flex items-center justify-center text-2xl shadow-sm border border-gray-50 flex-shrink-0" style={imageStyleFromName(item.item_name)}>
+                      {categoryIcon(item.category)}
+                    </div>
+                    <div className="flex-1 flex flex-col justify-center min-w-0">
+                      <div className="font-bold text-gray-800 text-sm truncate">{item.item_name}</div>
+                      <div className="font-bold text-teal-600 text-xs">{money(item.line_total_cents)}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setQty(item.id, item.quantity - 1)} className="w-6 h-6 rounded-lg bg-gray-100 text-gray-500 font-bold hover:bg-gray-200 transition-colors">-</button>
+                      <span className="w-5 text-center font-black text-sm">{item.quantity}</span>
+                      <button onClick={() => setQty(item.id, item.quantity + 1)} className="w-6 h-6 rounded-lg bg-gray-100 text-gray-500 font-bold hover:bg-gray-200 transition-colors">+</button>
+                    </div>
+                  </div>
                 ))
               )}
             </div>
           </div>
 
-          <div className="summary-items">
-            {billItems.length === 0 ? (
-              <p className="muted">No items selected</p>
-            ) : (
-              billItems.map((item) => (
-                <div key={item.id} className="summary-item">
-                  <div className="summary-thumb" style={imageStyleFromName(item.item_name)} />
-                  <div className="summary-info">
-                    <div>{item.item_name}</div>
-                    <strong>{money(item.line_total_cents)}</strong>
-                  </div>
-                  <div className="summary-qty">
-                    <span>QTY</span>
-                    <div className="qty-inline">
-                      <button onClick={() => setQty(item.id, item.quantity - 1)}>-</button>
-                      <b>{item.quantity}</b>
-                      <button onClick={() => setQty(item.id, item.quantity + 1)}>+</button>
-                    </div>
-                  </div>
+          {/* Pricing & Actions */}
+          <div className="px-6 py-6 bg-gray-900 text-white">
+            <div className="space-y-1.5 mb-6">
+              <div className="flex justify-between text-xs font-bold text-gray-400 uppercase tracking-wider">
+                <span>Subtotal</span>
+                <span>{money(subtotal)}</span>
+              </div>
+              {manualDiscountApplied > 0 && (
+                <div className="flex justify-between text-xs font-bold text-yellow-400 uppercase tracking-wider">
+                  <span>Discount</span>
+                  <span>-{money(manualDiscountApplied)}</span>
                 </div>
-              ))
-            )}
-          </div>
+              )}
+              {promoDiscountApplied > 0 && (
+                <div className="flex justify-between text-xs font-bold text-teal-400 uppercase tracking-wider">
+                  <span>Promo</span>
+                  <span>-{money(promoDiscountApplied)}</span>
+                </div>
+              )}
+            </div>
 
-          <div className="summary-totals">
-            <div><span>Subtotal:</span><b>{money(subtotal)}</b></div>
-            {manualDiscountApplied > 0 && (
-              <div><span>Discount:</span><b>{money(manualDiscountApplied)}</b></div>
-            )}
-            {promoDiscountApplied > 0 && (
-              <div><span>Promo:</span><b>{money(promoDiscountApplied)}</b></div>
-            )}
-            <div className="grand"><span>Total:</span><b>{money(total)}</b></div>
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                 onClick={startNewOrder}
+                 className="py-3 bg-gray-700 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-gray-600 transition-colors"
+              >
+                New
+              </button>
+              <button 
+                 onClick={holdOrder} 
+                 disabled={!orderId}
+                 className="py-3 bg-gray-700 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-gray-600 transition-all disabled:opacity-30"
+              >
+                Hold
+              </button>
+              <button 
+                 onClick={cancelOrder} 
+                 className="col-span-1 py-3 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all"
+              >
+                Delete
+              </button>
+              <button 
+                 onClick={finalizeOrder} 
+                 className="col-span-1 py-3 bg-teal-500 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-teal-500/20 hover:scale-[1.02] active:scale-95 transition-all"
+              >
+                Pay Now
+              </button>
+            </div>
           </div>
-
-          <div className="summary-actions">
-            <button onClick={startNewOrder}>NEW</button>
-            <button onClick={holdOrder} disabled={!orderId}>HOLD</button>
-            <button className="danger-lite" onClick={cancelOrder}>CANCEL ORDER</button>
-            <button className="send-lite" onClick={finalizeOrder}>GO TO PAYMENT</button>
-          </div>
-
-          {statusMsg && <div className="success">{statusMsg}</div>}
-          {error && <div className="error">{error}</div>}
+          
+          {statusMsg && <div className="absolute bottom-4 left-6 right-6 p-4 bg-green-500 text-white rounded-xl font-bold shadow-2xl animate-bounce text-center text-sm">{statusMsg}</div>}
+          {error && <div className="absolute bottom-4 left-6 right-6 p-4 bg-red-500 text-white rounded-xl font-bold shadow-2xl text-center text-sm">{error}</div>}
         </aside>
       </div>
     );

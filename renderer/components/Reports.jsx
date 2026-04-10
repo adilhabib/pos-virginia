@@ -82,251 +82,296 @@
       load().catch((e) => setError(e.message || "Failed to load reports."));
     }, [range]);
 
+    const [reportTab, setReportTab] = useState("financials");
+
     return (
-      <div className="screen-grid">
-        <div className="card">
-          <h2>Daily Register</h2>
-          <div className="row">
-            <button onClick={load}>Refresh</button>
-            <select value={range} onChange={(e) => setRange(e.target.value)}>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
-            </select>
-            <button className="primary" onClick={exportCsv}>Export Sales CSV</button>
-          </div>
-
-          <div className="row">
-            <div className="card">
-              <div className="muted">Opening Float</div>
-              <strong>{money(register?.totals?.openingFloat || 0)}</strong>
-            </div>
-            <div className="card">
-              <div className="muted">Today Sales</div>
-              <strong>{money(register?.totals?.sales || 0)}</strong>
-            </div>
-            <div className="card">
-              <div className="muted">Cash In</div>
-              <strong>{money(register?.totals?.cashIn || 0)}</strong>
-            </div>
-            <div className="card">
-              <div className="muted">Cash Out</div>
-              <strong>{money(register?.totals?.cashOut || 0)}</strong>
-            </div>
-            <div className="card">
-              <div className="muted">Expected Drawer</div>
-              <strong>{money(register?.totals?.expectedDrawer || 0)}</strong>
-            </div>
-            <div className="card">
-              <div className="muted">Actual Closed</div>
-              <strong>{money(register?.totals?.actualClosed || 0)}</strong>
+      <div className="flex flex-col h-full gap-6 p-2 overflow-hidden animate-in fade-in duration-500">
+        {/* Header & Main Controls */}
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 flex flex-col md:flex-row justify-between items-center gap-6 shrink-0">
+          <div className="flex-1">
+            <h2 className="text-2xl font-black text-gray-900 leading-none">Business Analytics</h2>
+            <div className="flex items-center gap-4 mt-2">
+               <div className="flex bg-gray-100 p-1 rounded-xl">
+                 {['daily', 'weekly', 'monthly'].map(t => (
+                   <button 
+                    key={t}
+                    onClick={() => setRange(t)}
+                    className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${range === t ? 'bg-white text-teal-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                   >
+                    {t}
+                   </button>
+                 ))}
+               </div>
+               <span className="h-4 w-[1px] bg-gray-100"></span>
+               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Statistical Audit Performance</p>
             </div>
           </div>
-
-          <h3>Payment Register (Today)</h3>
-          <table className="table">
-            <thead>
-              <tr><th>Time</th><th>Order</th><th>Cashier</th><th>Method</th><th>Amount</th><th>Received</th><th>Change</th></tr>
-            </thead>
-            <tbody>
-              {(register?.sales || []).map((s) => (
-                <tr key={`sale-${s.id}`}>
-                  <td>{s.created_at}</td>
-                  <td>#{s.order_id}</td>
-                  <td>{s.cashier || "-"}</td>
-                  <td>{s.method}</td>
-                  <td>{money(s.amount_cents)}</td>
-                  <td>{money(s.received_cents)}</td>
-                  <td>{money(s.change_cents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h3>Cash Register Movements (Today)</h3>
-          <table className="table">
-            <thead>
-              <tr><th>Time</th><th>User</th><th>Type</th><th>Reason</th><th>Ref</th><th>Amount</th></tr>
-            </thead>
-            <tbody>
-              {(register?.cashMovements || []).map((m) => (
-                <tr key={`mov-${m.id}`}>
-                  <td>{m.created_at}</td>
-                  <td>{m.username || "-"}</td>
-                  <td>{m.transaction_type}</td>
-                  <td>{m.reason}</td>
-                  <td>{m.reference_type || "-"} {m.reference_id || ""}</td>
-                  <td>{money(m.amount_cents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {message && <div className="success">{message}</div>}
-          {error && <div className="error">{error}</div>}
+          <div className="flex gap-3">
+             <button className="px-6 py-3 bg-white border border-gray-100 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-50 transition-all" onClick={load}>Reload Data</button>
+             <button className="px-6 py-3 bg-gray-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-800 shadow-xl shadow-gray-200 transition-all" onClick={exportCsv}>Export CSV</button>
+          </div>
         </div>
 
-        <div className="card">
-          <h2>Sessions & Summary</h2>
-          <h3>End-of-Day Close (Today)</h3>
-          <table className="table">
-            <tbody>
-              <tr><td>Opening Float</td><td>{money(summary?.eodClose?.openingFloat || 0)}</td></tr>
-              <tr><td>Cash In</td><td>{money(summary?.eodClose?.cashIn || 0)}</td></tr>
-              <tr><td>Cash Out</td><td>{money(summary?.eodClose?.cashOut || 0)}</td></tr>
-              <tr><td>Expected Close</td><td>{money(summary?.eodClose?.expectedClose || 0)}</td></tr>
-              <tr><td>Actual Closed</td><td>{money(summary?.eodClose?.actualClose || 0)}</td></tr>
-              <tr><td>Variance</td><td>{money(summary?.eodClose?.variance || 0)}</td></tr>
-              <tr><td>Closed Sessions</td><td>{summary?.eodClose?.closedSessions || 0}</td></tr>
-            </tbody>
-          </table>
-
-          <h3>Cashier-wise Sales ({range})</h3>
-          <table className="table">
-            <thead>
-              <tr><th>Cashier</th><th>Paid Orders</th><th>Sales</th></tr>
-            </thead>
-            <tbody>
-              {(summary?.cashierSales || []).map((c) => (
-                <tr key={`cashier-${c.cashier || "unknown"}`}>
-                  <td>{c.cashier || "-"}</td>
-                  <td>{c.paid_orders}</td>
-                  <td>{money(c.gross_sales)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h3>Category Margin ({range})</h3>
-          <table className="table">
-            <thead>
-              <tr><th>Category</th><th>Net Sales</th><th>Est. Cost</th><th>Gross Margin</th></tr>
-            </thead>
-            <tbody>
-              {(summary?.categoryMargin || []).map((c) => (
-                <tr key={`cat-${c.category}`}>
-                  <td>{c.category}</td>
-                  <td>{money(c.net_sales_cents)}</td>
-                  <td>{money(c.estimated_cost_cents)}</td>
-                  <td>{money(c.gross_margin_cents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h3>Category Size Breakdown ({range})</h3>
-          <table className="table">
-            <thead>
-              <tr><th>Category</th><th>Size</th><th>Qty</th><th>Net Sales</th></tr>
-            </thead>
-            <tbody>
-              {(summary?.sizeMargin || []).map((c) => (
-                <tr key={`size-${c.category}-${c.size}`}>
-                  <td>{c.category}</td>
-                  <td>{c.size}</td>
-                  <td>{c.quantity}</td>
-                  <td>{money(c.net_sales_cents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h3>Tax Summary ({range})</h3>
-          <table className="table">
-            <tbody>
-              <tr><td>Taxable Sales</td><td>{money(summary?.taxSummary?.taxable_sales_cents || 0)}</td></tr>
-              <tr><td>Total Discount</td><td>{money(summary?.taxSummary?.total_discount_cents || 0)}</td></tr>
-              <tr><td>Tax Collected</td><td>{money(summary?.taxSummary?.tax_collected_cents || 0)}</td></tr>
-              <tr><td>Net Sales</td><td>{money(summary?.taxSummary?.net_sales_cents || 0)}</td></tr>
-            </tbody>
-          </table>
-
-          <h3>Cash Sessions (Today)</h3>
-          <table className="table">
-            <thead>
-              <tr><th>ID</th><th>Status</th><th>Open</th><th>Expected</th><th>Close</th><th>Variance</th></tr>
-            </thead>
-            <tbody>
-              {(register?.sessions || []).map((s) => (
-                <tr key={`session-${s.id}`}>
-                  <td>{s.id}</td>
-                  <td>{s.status}</td>
-                  <td>{money(s.opening_cents)}</td>
-                  <td>{s.expected_closing_cents == null ? "-" : money(s.expected_closing_cents)}</td>
-                  <td>{s.closing_cents == null ? "-" : money(s.closing_cents)}</td>
-                  <td>{s.variance_cents == null ? "-" : money(s.variance_cents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h3>Sales Summary ({range})</h3>
-          <p>Paid orders: <strong>{summary?.sales?.paid_orders || 0}</strong></p>
-          <p>Gross sales: <strong>{money(summary?.sales?.gross_sales || 0)}</strong></p>
-
-          <h3>Top Items</h3>
-          <ul>
-            {(summary?.topItems || []).map((i) => <li key={i.name}>{i.name}: {i.qty}</li>)}
-          </ul>
-
-          <h3>Low Stock Alerts</h3>
-          <ul>
-            {(summary?.lowStock || []).length
-              ? summary.lowStock.map((i) => <li key={i.id}>{i.name}: {i.stock_qty} (threshold {i.low_stock_threshold})</li>)
-              : <li>No low-stock ingredients.</li>}
-          </ul>
-
-          <h3>Procurement Snapshot</h3>
-          <table className="table">
-            <tbody>
-              <tr><td>Stock Valuation</td><td>{money(procurement?.stockValuationCents || 0)}</td></tr>
-              <tr><td>Open PO</td><td>{procurement?.openPoCount || 0}</td></tr>
-              <tr><td>Received PO</td><td>{procurement?.receivedPoCount || 0}</td></tr>
-              <tr><td>Today Received Value</td><td>{money(procurement?.todayReceivedValueCents || 0)}</td></tr>
-            </tbody>
-          </table>
-
-          <h3>Top Suppliers (by PO value)</h3>
-          <table className="table">
-            <thead>
-              <tr><th>Supplier</th><th>Total PO Value</th></tr>
-            </thead>
-            <tbody>
-              {(procurement?.topSuppliers || []).map((s) => (
-                <tr key={`supplier-${s.supplier}`}>
-                  <td>{s.supplier}</td>
-                  <td>{money(s.total_cost_cents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h3>Backup & Restore</h3>
-          <div className="row">
-            <button className="primary" onClick={createBackupNow}>Create Backup Now</button>
-            <select value={selectedBackup} onChange={(e) => setSelectedBackup(e.target.value)}>
-              <option value="">Select backup</option>
-              {backups.map((b) => (
-                <option key={b.fileName} value={b.fileName}>{b.fileName}</option>
-              ))}
-            </select>
-            <button onClick={restoreSelectedBackup}>Restore Selected</button>
-          </div>
-          <table className="table">
-            <thead>
-              <tr><th>File</th><th>Modified</th><th>Size (KB)</th></tr>
-            </thead>
-            <tbody>
-              {backups.map((b) => (
-                <tr key={`backup-${b.fileName}`}>
-                  <td>{b.fileName}</td>
-                  <td>{b.modifiedAt}</td>
-                  <td>{(Number(b.sizeBytes || 0) / 1024).toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* KPI Summary Row */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 shrink-0">
+           {[
+             { label: 'Opening Float', value: register?.totals?.openingFloat || 0, color: 'text-gray-900', bg: 'bg-white' },
+             { label: 'Net Sales', value: register?.totals?.sales || 0, color: 'text-teal-600', bg: 'bg-teal-50' },
+             { label: 'Cash In', value: register?.totals?.cashIn || 0, color: 'text-teal-600', bg: 'bg-white' },
+             { label: 'Cash Out', value: register?.totals?.cashOut || 0, color: 'text-red-500', bg: 'bg-red-50' },
+             { label: 'Expected Drawer', value: register?.totals?.expectedDrawer || 0, color: 'text-gray-900', bg: 'bg-white', border: 'border-teal-100' },
+             { label: 'Actual Closed', value: register?.totals?.actualClosed || 0, color: 'text-gray-900', bg: 'bg-gray-50' }
+           ].map((kpi, idx) => (
+             <div key={idx} className={`p-4 rounded-3xl shadow-sm border border-gray-100 ${kpi.bg} ${kpi.border || ''}`}>
+                <span className="block text-[8px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">{kpi.label}</span>
+                <span className={`text-sm font-black tracking-tighter ${kpi.color}`}>{money(kpi.value)}</span>
+             </div>
+           ))}
         </div>
+
+        {/* Tab Navigation */}
+        <div className="flex gap-2 shrink-0 border-b border-gray-100 pb-1">
+           {[
+             { id: 'financials', label: 'Financial Register' },
+             { id: 'analytics', label: 'Product Analytics' },
+             { id: 'system', label: 'System & Backups' }
+           ].map(tab => (
+             <button 
+              key={tab.id}
+              onClick={() => setReportTab(tab.id)}
+              className={`px-6 py-3 text-[10px] font-black uppercase tracking-widest transition-all relative ${reportTab === tab.id ? 'text-teal-600' : 'text-gray-400 hover:text-gray-600'}`}
+             >
+                {tab.label}
+                {reportTab === tab.id && <div className="absolute bottom-0 left-6 right-6 h-0.5 bg-teal-600 rounded-full animate-in fade-in slide-in-from-bottom-1"></div>}
+             </button>
+           ))}
+        </div>
+
+        {/* Scrollable Content Area */}
+        <div className="flex-1 overflow-y-auto pr-1 scrollbar-hide">
+          
+          {reportTab === 'financials' && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-300">
+               {/* Sales Register */}
+               <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                  <div className="p-5 border-b border-gray-50 bg-gray-50/30">
+                     <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest italic">Sales Transaction Audit</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                       <thead className="text-[9px] font-black text-gray-400 uppercase tracking-widest bg-white">
+                          <tr>
+                            <th className="px-6 py-4">Time</th>
+                            <th className="px-4 py-4">Order ID</th>
+                            <th className="px-4 py-4">Cashier</th>
+                            <th className="px-4 py-4">Payment</th>
+                            <th className="px-4 py-4 text-right">Value</th>
+                            <th className="px-4 py-4 text-right">Received</th>
+                            <th className="px-6 py-4 text-right">Change</th>
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-50 text-[11px] font-bold">
+                          {(register?.sales || []).map((s) => (
+                            <tr key={s.id} className="hover:bg-gray-50/50">
+                               <td className="px-6 py-4 text-gray-400">{new Date(s.created_at).toLocaleTimeString()}</td>
+                               <td className="px-4 py-4 text-gray-900">#{s.order_id}</td>
+                               <td className="px-4 py-4 text-gray-500 uppercase">{s.cashier || "-"}</td>
+                               <td className="px-4 py-4">
+                                  <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full text-[9px] font-black uppercase">{s.method}</span>
+                               </td>
+                               <td className="px-4 py-4 text-right font-black">{money(s.amount_cents)}</td>
+                               <td className="px-4 py-4 text-right text-gray-500">{money(s.received_cents)}</td>
+                               <td className="px-6 py-4 text-right text-red-400">{money(s.change_cents)}</td>
+                            </tr>
+                          ))}
+                       </tbody>
+                    </table>
+                  </div>
+               </div>
+
+               {/* Cash Movements */}
+               <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                  <div className="p-5 border-b border-gray-50 bg-gray-50/30">
+                     <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest italic">Cash Movement Ledger</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                       <thead className="text-[9px] font-black text-gray-400 uppercase tracking-widest">
+                          <tr>
+                             <th className="px-6 py-4">Timestamp</th>
+                             <th className="px-4 py-4">User</th>
+                             <th className="px-4 py-4">Direction</th>
+                             <th className="px-4 py-4">Ref / Memo</th>
+                             <th className="px-6 py-4 text-right">Amount PKR</th>
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-50 text-[11px] font-bold">
+                          {(register?.cashMovements || []).map((m) => (
+                            <tr key={m.id} className="hover:bg-gray-50/50">
+                               <td className="px-6 py-4 text-gray-400">{new Date(m.created_at).toLocaleTimeString()}</td>
+                               <td className="px-4 py-4 uppercase">{m.username || "-"}</td>
+                               <td className="px-4 py-4">
+                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${m.transaction_type === "IN" ? 'bg-teal-50 text-teal-600' : 'bg-red-50 text-red-500'}`}>
+                                     {m.transaction_type}
+                                  </span>
+                               </td>
+                               <td className="px-4 py-4 text-gray-500 italic">{m.reason} <span className="text-[9px] ml-2 font-black opacity-30">{m.reference_type} #{m.reference_id}</span></td>
+                               <td className={`px-6 py-4 text-right font-black ${m.transaction_type === "IN" ? 'text-teal-600' : 'text-red-500'}`}>{money(m.amount_cents)}</td>
+                            </tr>
+                          ))}
+                       </tbody>
+                    </table>
+                  </div>
+               </div>
+            </div>
+          )}
+
+          {reportTab === 'analytics' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in zoom-in-95 duration-300 pb-12">
+               {/* Margin & Tax Grid */}
+               <div className="space-y-6">
+                  <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
+                     <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest border-b border-gray-50 pb-3">Tax & Net Contribution</h3>
+                     <div className="space-y-3">
+                        {[
+                          { label: 'Taxable Gross', value: summary?.taxSummary?.taxable_sales_cents || 0 },
+                          { label: 'Total Discounts', value: summary?.taxSummary?.total_discount_cents || 0, color: 'text-red-500' },
+                          { label: 'VAT / Tax Collected', value: summary?.taxSummary?.tax_collected_cents || 0, color: 'text-blue-600' },
+                          { label: 'Net Business Income', value: summary?.taxSummary?.net_sales_cents || 0, color: 'text-teal-600 font-black' }
+                        ].map((row, i) => (
+                          <div key={i} className="flex justify-between items-center text-xs">
+                             <span className="font-bold text-gray-400 uppercase tracking-wider">{row.label}</span>
+                             <span className={`font-black tracking-tighter ${row.color || 'text-gray-900'}`}>{money(row.value)}</span>
+                          </div>
+                        ))}
+                     </div>
+                  </div>
+
+                  <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                     <div className="p-5 border-b border-gray-50"><h4 className="text-[10px] font-black uppercase tracking-widest text-gray-400 italic">Category Performance</h4></div>
+                     <table className="w-full text-left text-[11px]">
+                        <thead className="bg-gray-50 text-[9px] font-black text-gray-400">
+                           <tr className="uppercase tracking-widest"><th className="px-6 py-3">Category</th><th className="px-4 py-3">Gross Sales</th><th className="px-6 py-3 text-right">Gross Margin</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50 font-black">
+                           {(summary?.categoryMargin || []).map((c) => (
+                             <tr key={c.category} className="hover:bg-gray-50/30">
+                                <td className="px-6 py-4 text-gray-900 uppercase tracking-tighter">{c.category}</td>
+                                <td className="px-4 py-4 text-gray-500 font-medium">{money(c.net_sales_cents)}</td>
+                                <td className="px-6 py-4 text-right text-teal-600">{money(c.gross_margin_cents)}</td>
+                             </tr>
+                           ))}
+                        </tbody>
+                     </table>
+                  </div>
+               </div>
+
+               {/* Right Side: Staff & Procurement */}
+               <div className="space-y-6">
+                  <div className="bg-gray-900 text-white rounded-3xl shadow-xl p-8 space-y-6 border-b-8 border-teal-600">
+                     <h3 className="text-xs font-black text-teal-400 uppercase tracking-[0.2em] italic">Procurement Performance</h3>
+                     <div className="grid grid-cols-2 gap-6">
+                        <div className="space-y-1">
+                           <span className="text-[9px] text-teal-500/50 uppercase font-black">Stock Asset Valuation</span>
+                           <h4 className="text-xl font-black">{money(procurement?.stockValuationCents || 0)}</h4>
+                        </div>
+                        <div className="space-y-1">
+                           <span className="text-[9px] text-teal-500/50 uppercase font-black">Today Pur. Value</span>
+                           <h4 className="text-xl font-black">{money(procurement?.todayReceivedValueCents || 0)}</h4>
+                        </div>
+                        <div className="col-span-2 grid grid-cols-2 gap-3 pt-4 border-t border-white/5">
+                           <div className="p-3 bg-white/5 rounded-2xl">
+                              <span className="text-[10px] text-gray-400 block mb-1">Active POs</span>
+                              <span className="text-lg font-black">{procurement?.openPoCount || 0}</span>
+                           </div>
+                           <div className="p-3 bg-white/5 rounded-2xl">
+                              <span className="text-[10px] text-gray-400 block mb-1">Fulfilled POs</span>
+                              <span className="text-lg font-black">{procurement?.receivedPoCount || 0}</span>
+                           </div>
+                        </div>
+                     </div>
+                  </div>
+
+                  <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                     <div className="p-5 border-b border-gray-50"><h4 className="text-[10px] font-black uppercase tracking-widest text-gray-400 italic">Cashier Contribution</h4></div>
+                     <table className="w-full text-left text-[11px]">
+                        <thead className="bg-gray-50 text-[9px] font-black text-gray-400">
+                           <tr className="uppercase tracking-widest"><th className="px-6 py-3">Cashier</th><th className="px-4 py-3">Orders</th><th className="px-6 py-3 text-right">Gross Generated</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50 font-black">
+                           {(summary?.cashierSales || []).map((c) => (
+                             <tr key={c.cashier} className="hover:bg-gray-50/30">
+                                <td className="px-6 py-4 text-gray-900 uppercase tracking-tighter">{c.cashier || "System"}</td>
+                                <td className="px-4 py-4 text-gray-500 font-medium">{c.paid_orders} Txns</td>
+                                <td className="px-6 py-4 text-right text-gray-900">{money(c.gross_sales)}</td>
+                             </tr>
+                           ))}
+                        </tbody>
+                     </table>
+                  </div>
+               </div>
+            </div>
+          )}
+
+          {reportTab === 'system' && (
+            <div className="max-w-4xl mx-auto space-y-6 animate-in slide-in-from-bottom-4 duration-500 pb-12">
+               <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-8 space-y-8">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                     <div>
+                        <h3 className="text-xl font-black text-gray-900">Vault & System Maintenance</h3>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1 italic">Database Backups & Disaster Recovery Tools</p>
+                     </div>
+                     <button className="px-8 py-4 bg-teal-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-teal-100 hover:bg-teal-700 transition-all active:scale-95" onClick={createBackupNow}>Initialize Instant Backup</button>
+                  </div>
+
+                  <div className="space-y-4">
+                     <div className="flex items-center gap-4 p-4 bg-blue-50 border border-blue-100 rounded-3xl">
+                        <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-xl">🕒</div>
+                        <div className="flex-1">
+                           <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest block mb-1">Available Recovery Points</label>
+                           <select className="w-full bg-transparent border-none text-sm font-black text-blue-900 outline-none cursor-pointer" value={selectedBackup} onChange={(e) => setSelectedBackup(e.target.value)}>
+                              <option value="">Select a snapshot for restoration...</option>
+                              {backups.map(b => <option key={b.fileName} value={b.fileName}>{b.fileName} ({ (b.sizeBytes / 1024).toFixed(1) } KB)</option>)}
+                           </select>
+                        </div>
+                        <button className="px-6 py-2 bg-gray-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all" onClick={restoreSelectedBackup}>Restore</button>
+                     </div>
+
+                     <div className="overflow-hidden border border-gray-50 rounded-3xl">
+                        <table className="w-full text-left text-xs">
+                           <thead className="bg-gray-50 text-[9px] font-black text-gray-400 uppercase tracking-widest">
+                              <tr><th className="px-8 py-4">Snapshot Identifier</th><th className="px-6 py-4">Creation Date</th><th className="px-8 py-4 text-right">Payload Size</th></tr>
+                           </thead>
+                           <tbody className="divide-y divide-gray-50 font-bold">
+                              {backups.map(b => (
+                                <tr key={b.fileName} className="hover:bg-gray-50/50 transition-colors">
+                                   <td className="px-8 py-4 text-gray-900 italic">{b.fileName}</td>
+                                   <td className="px-6 py-4 text-gray-400">{b.modifiedAt}</td>
+                                   <td className="px-8 py-4 text-right font-black text-teal-600">{(b.sizeBytes / 1024).toFixed(2)} KB</td>
+                                </tr>
+                              ))}
+                           </tbody>
+                        </table>
+                     </div>
+                  </div>
+               </div>
+            </div>
+          )}
+        </div>
+
+        {/* Feedback Messages */}
+        {message && (
+          <div className="fixed bottom-6 right-6 px-8 py-5 bg-gray-900 text-white rounded-[2rem] font-black shadow-2xl animate-in slide-in-from-right-full z-50 text-xs uppercase tracking-widest border border-white/10 flex items-center gap-4">
+             <span className="w-2 h-2 bg-teal-400 rounded-full animate-ping"></span>
+             {message}
+          </div>
+        )}
+        {error && (
+          <div className="fixed bottom-6 right-6 px-8 py-5 bg-red-600 text-white rounded-[2rem] font-black shadow-2xl animate-in shake z-50 text-xs uppercase tracking-widest flex items-center gap-4 border-b-4 border-red-800">
+             <span className="text-xl">⚠️</span>
+             {error}
+          </div>
+        )}
       </div>
     );
   }

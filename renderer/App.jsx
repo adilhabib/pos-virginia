@@ -1,6 +1,7 @@
 const { useEffect, useMemo, useState } = React;
 
 const NAV_ITEMS = [
+  { key: "dashboard", target: "dashboard", label: "DASHBOARD", icon: "dashboard", roles: ["ADMIN", "MANAGER", "CASHIER"] },
   { key: "home", target: "orders", label: "HOME", icon: "home", roles: ["ADMIN", "MANAGER", "CASHIER"] },
   { key: "payment", target: "checkout", label: "PAYMENT", icon: "payment", roles: ["ADMIN", "MANAGER", "CASHIER"] },
   { key: "credit", target: "credit", label: "CREDIT", icon: "credit", roles: ["ADMIN", "MANAGER", "CASHIER"] },
@@ -35,6 +36,16 @@ function NavIcon({ name }) {
       <svg {...common}>
         <rect x="2" y="5" width="20" height="14" rx="2" />
         <path d="M2 10h20" />
+      </svg>
+    );
+  }
+  if (name === "dashboard") {
+    return (
+      <svg {...common}>
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="11" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
+        <rect x="14" y="16" width="7" height="5" rx="1" />
       </svg>
     );
   }
@@ -115,8 +126,8 @@ function formatNow() {
 
 function App() {
   const [user, setUser] = useState(null);
-  const [activeScreen, setActiveScreen] = useState("orders");
-  const [activeNavKey, setActiveNavKey] = useState("home");
+  const [activeScreen, setActiveScreen] = useState("dashboard");
+  const [activeNavKey, setActiveNavKey] = useState("dashboard");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [cashShiftOpen, setCashShiftOpen] = useState(true);
   const [cashShiftPromptVisible, setCashShiftPromptVisible] = useState(false);
@@ -188,75 +199,57 @@ function App() {
   if (!user) return <window.POSComponents.Login onLogin={setUser} />;
 
   return (
-    <div className="replica-shell">
+    <>
       {cashShiftPromptVisible && (
-        <div className="shift-modal-backdrop">
-          <div className="shift-modal">
-            <h3>Cash shift is not open</h3>
-            <p>Open a cash shift before taking payments.</p>
-            {cashShiftPromptError && <div className="error">{cashShiftPromptError}</div>}
-            <div className="shift-modal-actions">
-              <button className="primary" onClick={navigateToCashShift}>Open Cash Shift</button>
-              <button className="shift-link-btn" onClick={navigateToCashShift}>Go to Cash Session page</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+          <div className="bg-white rounded-3xl shadow-2xl border border-gray-100 p-8 max-w-sm w-full text-center space-y-6">
+            <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mx-auto text-2xl">⚠️</div>
+            <div>
+              <h3 className="text-xl font-black text-gray-900 uppercase tracking-tight">Shift Not Open</h3>
+              <p className="text-gray-400 text-sm mt-2">Open a cash shift session before proceeding with any sales or payments.</p>
+            </div>
+            {cashShiftPromptError && <div className="p-3 bg-red-50 text-red-600 rounded-xl text-xs font-bold">{cashShiftPromptError}</div>}
+            <div className="space-y-2 pt-2">
+              <button className="w-full py-4 bg-teal-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-teal-700 shadow-lg shadow-teal-100 transition-all" onClick={navigateToCashShift}>Open Cash Shift</button>
+              <button className="w-full py-3 text-gray-400 hover:text-gray-600 font-bold text-[10px] uppercase tracking-widest transition-colors" onClick={navigateToCashShift}>Skip to Session Page</button>
             </div>
           </div>
         </div>
       )}
-      <header className="replica-topbar">
-        <div className="logo-mark">
-          <img className="logo-image" src="../assets/logo.png" alt="POS logo" />
-        </div>
-        <div className="top-right-tools">
-          <div className="top-search">
-            <input placeholder="Search product or any order..." />
-            <span><SearchIcon /></span>
-          </div>
-          <div className="top-date">
-            <DateIcon />
-            <span>{formatNow()}</span>
-          </div>
-        </div>
-      </header>
 
-      <div className="replica-body">
-        <aside className="replica-nav">
-          {availableNav.map((item) => (
-            <button
-              key={item.key}
-              className={activeNavKey === item.key ? "left-nav-item active" : "left-nav-item"}
-              onClick={() => {
-                setActiveNavKey(item.key);
-                setActiveScreen(item.target);
-                if (item.target === "cash") {
-                  setCashShiftPromptVisible(false);
-                } else if (!cashShiftOpen) {
-                  setCashShiftPromptVisible(true);
-                }
-              }}
-            >
-              <span className="icon"><NavIcon name={item.icon} /></span>
-              <span>{item.label}</span>
-            </button>
-          ))}
-          <div className="version-tag">v.1.0</div>
-          <button className="logout-lite" onClick={() => setUser(null)}>Log out</button>
-        </aside>
-
-        <main className="replica-main">
-          {activeScreen === "orders" && (
-            <window.POSComponents.OrderScreen user={user} onOrderSelected={handleOrderSelected} onGoToPayment={goToPayment} />
-          )}
-          {activeScreen === "checkout" && (
-            <window.POSComponents.Checkout user={user} selectedOrder={selectedOrder} onPaid={handleOrderPaid} />
-          )}
-          {activeScreen === "credit" && <window.POSComponents.CreditRegister user={user} />}
-          {activeScreen === "inventory" && <window.POSComponents.Inventory user={user} />}
-          {activeScreen === "employees" && <window.POSComponents.Employees user={user} />}
-          {activeScreen === "cash" && <window.POSComponents.CashSession user={user} />}
-          {activeScreen === "reports" && <window.POSComponents.Reports user={user} />}
-        </main>
-      </div>
-    </div>
+      <window.POSLayouts.MainLayout
+        sidebar={
+          <window.POSComponents.Sidebar
+            navItems={availableNav}
+            activeKey={activeNavKey}
+            onSelect={(item) => {
+              setActiveNavKey(item.key);
+              setActiveScreen(item.target);
+              if (item.target === "cash") {
+                setCashShiftPromptVisible(false);
+              } else if (!cashShiftOpen) {
+                setCashShiftPromptVisible(true);
+              }
+            }}
+            onLogout={() => setUser(null)}
+          />
+        }
+        topbar={<window.POSComponents.Topbar dateString={formatNow()} />}
+      >
+        {activeScreen === "dashboard" && <window.POSPages.Dashboard />}
+        {activeScreen === "orders" && (
+          <window.POSComponents.OrderScreen user={user} onOrderSelected={handleOrderSelected} onGoToPayment={goToPayment} />
+        )}
+        {activeScreen === "checkout" && (
+          <window.POSComponents.Checkout user={user} selectedOrder={selectedOrder} onPaid={handleOrderPaid} />
+        )}
+        {activeScreen === "credit" && <window.POSComponents.CreditRegister user={user} />}
+        {activeScreen === "inventory" && <window.POSComponents.Inventory user={user} />}
+        {activeScreen === "employees" && <window.POSComponents.Employees user={user} />}
+        {activeScreen === "cash" && <window.POSComponents.CashSession user={user} />}
+        {activeScreen === "reports" && <window.POSComponents.Reports user={user} />}
+      </window.POSLayouts.MainLayout>
+    </>
   );
 }
 
