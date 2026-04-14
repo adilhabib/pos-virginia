@@ -237,6 +237,7 @@
                           { label: 'Taxable Gross', value: summary?.taxSummary?.taxable_sales_cents || 0 },
                           { label: 'Total Discounts', value: summary?.taxSummary?.total_discount_cents || 0, color: 'text-red-500' },
                           { label: 'VAT / Tax Collected', value: summary?.taxSummary?.tax_collected_cents || 0, color: 'text-blue-600' },
+                          { label: 'Direct COGS', value: summary?.taxSummary?.total_cost_cents || 0, color: 'text-orange-600' },
                           { label: 'Net Business Income', value: summary?.taxSummary?.net_sales_cents || 0, color: 'text-teal-600 font-black' }
                         ].map((row, i) => (
                           <div key={i} className="flex justify-between items-center text-xs">
@@ -251,16 +252,27 @@
                      <div className="p-5 border-b border-gray-50"><h4 className="text-[10px] font-black uppercase tracking-widest text-gray-400 italic">Category Performance</h4></div>
                      <table className="w-full text-left text-[11px]">
                         <thead className="bg-gray-50 text-[9px] font-black text-gray-400">
-                           <tr className="uppercase tracking-widest"><th className="px-6 py-3">Category</th><th className="px-4 py-3">Gross Sales</th><th className="px-6 py-3 text-right">Gross Margin</th></tr>
+                           <tr className="uppercase tracking-widest">
+                             <th className="px-6 py-3">Category</th>
+                             <th className="px-4 py-3 text-right">Revenue</th>
+                             <th className="px-4 py-3 text-right">Cost</th>
+                             <th className="px-4 py-3 text-right">Profit</th>
+                             <th className="px-6 py-3 text-right">Margin %</th>
+                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50 font-black">
-                           {(summary?.categoryMargin || []).map((c) => (
-                             <tr key={c.category} className="hover:bg-gray-50/30">
-                                <td className="px-6 py-4 text-gray-900 uppercase tracking-tighter">{c.category}</td>
-                                <td className="px-4 py-4 text-gray-500 font-medium">{money(c.net_sales_cents)}</td>
-                                <td className="px-6 py-4 text-right text-teal-600">{money(c.gross_margin_cents)}</td>
-                             </tr>
-                           ))}
+                           {(summary?.categoryMargin || []).map((c) => {
+                             const marginPct = c.net_sales_cents > 0 ? Math.round((c.gross_margin_cents / c.net_sales_cents) * 100) : 0;
+                             return (
+                               <tr key={c.category} className="hover:bg-gray-50/30 text-[10px]">
+                                  <td className="px-6 py-4 text-gray-900 uppercase tracking-tighter">{c.category}</td>
+                                  <td className="px-4 py-4 text-right text-gray-500">{money(c.net_sales_cents)}</td>
+                                  <td className="px-4 py-4 text-right text-orange-400 font-medium">{money(c.estimated_cost_cents)}</td>
+                                  <td className="px-4 py-4 text-right text-teal-600">{money(c.gross_margin_cents)}</td>
+                                  <td className={`px-6 py-4 text-right ${marginPct < 30 ? 'text-red-400' : 'text-teal-400'}`}>{marginPct}%</td>
+                               </tr>
+                             );
+                           })}
                         </tbody>
                      </table>
                   </div>

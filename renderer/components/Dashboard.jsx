@@ -1,4 +1,4 @@
-﻿
+
 (function () {
   const { useEffect, useMemo, useState } = React;
   const { money } = window.POSUtils.db;
@@ -42,24 +42,30 @@
     }, []);
 
     const dailySales = dailySummary?.sales?.gross_sales || 0;
+    const dailyCost = dailySummary?.taxSummary?.total_cost_cents || 0;
+    const dailyProfit = dailySales - dailyCost;
+    const dailyMarginPct = dailySales > 0 ? Math.round((dailyProfit / dailySales) * 100) : 0;
+
     const monthlySales = monthlySummary?.sales?.gross_sales || 0;
     const customerCredit = creditStats?.customerOutstandingTotal || 0;
     const vendorPayables = creditStats?.vendorPayableTotal || 0;
-    const compareHeights = barHeights([dailySales, monthlySales], 120);
-    const creditHeights = barHeights([customerCredit, vendorPayables], 110);
 
-    const paymentMix = useMemo(() => {
-      const rows = dailySummary?.cashierSales || [];
-      const total = rows.reduce((a, r) => a + Number(r.gross_sales || 0), 0) || 1;
-      return rows.slice(0, 5).map((r) => ({
-        label: r.cashier || "-",
-        value: Number(r.gross_sales || 0),
-        pct: clamp(Math.round((Number(r.gross_sales || 0) / total) * 100), 0, 100)
-      }));
-    }, [dailySummary]);
+    const comp = dailySummary?.comparison || {};
+    const monthComp = monthlySummary?.comparison || {};
 
-    const topItems = dailySummary?.topItems || [];
-    const topItemHeights = barHeights(topItems.map((i) => i.qty || 0), 120);
+    function Trend({ value, label }) {
+      if (value === undefined || value === null) return null;
+      const isUp = value > 0;
+      const isDown = value < 0;
+      const color = isUp ? "text-teal-600" : isDown ? "text-red-500" : "text-gray-400";
+      const arrow = isUp ? "↑" : isDown ? "↓" : "→";
+      return (
+        <div className={`text-[10px] font-black uppercase tracking-widest mt-1 flex items-center gap-1 ${color}`}>
+          <span>{arrow} {Math.abs(value)}%</span>
+          <span className="opacity-40 font-bold text-gray-400">vs {label}</span>
+        </div>
+      );
+    }
 
     return (
       <div className="screen-grid dashboard-screen">
@@ -71,26 +77,39 @@
           <button onClick={load}>Refresh</button>
         </div>
 
-        <div className="dashboard-kpis">
+        <div className="dashboard-kpis grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <div className="card kpi">
             <span>Daily Sales</span>
             <strong>{money(dailySales)}</strong>
-            <small>Paid orders: {dailySummary?.sales?.paid_orders || 0}</small>
+            <Trend value={comp.salesChangePct} label="yesterday" />
+            <small className="mt-2">Paid orders: {dailySummary?.sales?.paid_orders || 0}</small>
+          </div>
+          <div className="card kpi">
+            <span>Daily Profit</span>
+            <strong className="text-teal-600 font-black">{money(dailyProfit)}</strong>
+            <Trend value={comp.profitChangePct} label="yesterday" />
+            <small className="mt-2">Estimated COGS: {money(dailyCost)}</small>
+          </div>
+          <div className="card kpi">
+            <span>Gross Margin</span>
+            <strong className={dailyMarginPct < 30 ? 'text-red-500' : 'text-teal-500'}>{dailyMarginPct}%</strong>
+            <small className="mt-1">Profitability Ratio</small>
           </div>
           <div className="card kpi">
             <span>Monthly Sales</span>
             <strong>{money(monthlySales)}</strong>
-            <small>Paid orders: {monthlySummary?.sales?.paid_orders || 0}</small>
+            <Trend value={monthComp.salesChangePct} label="last month" />
+            <small className="mt-2">Orders: {monthlySummary?.sales?.paid_orders || 0}</small>
           </div>
           <div className="card kpi">
             <span>Customer Credit</span>
             <strong>{money(customerCredit)}</strong>
-            <small>Customers due: {creditStats?.customerDueCount || 0}</small>
+            <small className="mt-2">Customers due: {creditStats?.customerDueCount || 0}</small>
           </div>
           <div className="card kpi">
             <span>Vendor Payables</span>
             <strong>{money(vendorPayables)}</strong>
-            <small>Vendor payments today: {money(creditStats?.todayVendorPaymentsTotal || 0)}</small>
+            <small className="mt-2 text-red-400 font-bold">Payables Today</small>
           </div>
         </div>
 

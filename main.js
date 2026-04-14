@@ -20,7 +20,7 @@ function loadEnvFromKnownPaths() {
     try {
       if (!fs.existsSync(fp)) continue;
       dotenv.config({ path: fp, override: false });
-    } catch (_) {}
+    } catch (_) { }
   }
 }
 
@@ -118,20 +118,38 @@ function moveDirIfNeeded(srcDir, destDir) {
 }
 
 function migrateLegacyStorage() {
+  const appData = app.getPath("appData");
+  const oldUserDataPath = path.join(appData, "Virginia POS");
+  const oldDataDir = path.join(oldUserDataPath, "data");
+
   const legacyBases = [];
   if (!__dirname.includes("app.asar")) {
     legacyBases.push(__dirname);
   }
   legacyBases.push(userDataPath);
+  legacyBases.push(oldUserDataPath); // Check old root (Roamin/Virginia POS)
+  legacyBases.push(oldDataDir);      // Check old data dir (Roaming/Virginia POS/data)
+
   for (const base of legacyBases) {
+    if (!fs.existsSync(base)) continue;
+    
+    // Check various common legacy structures
     const legacyDb = path.join(base, "local-db.json");
     const legacyReceipts = path.join(base, "backup", "receipts");
     const legacyBackups = path.join(base, "backup", "daily_backups");
+
+    // Also check if they were in the root of the folder or data folder
+    const legacyReceiptsAlt = path.join(base, "receipts");
+    const legacyBackupsAlt = path.join(base, "daily_backups");
+
     movePathIfNeeded(legacyDb, LOCAL_DB_PATH);
     moveDirIfNeeded(legacyReceipts, RECEIPTS_DIR);
     moveDirIfNeeded(legacyBackups, DAILY_BACKUPS_DIR);
+    moveDirIfNeeded(legacyReceiptsAlt, RECEIPTS_DIR);
+    moveDirIfNeeded(legacyBackupsAlt, DAILY_BACKUPS_DIR);
   }
 }
+
 
 function ensureConfig() {
   try {
@@ -613,7 +631,7 @@ async function ensureDailyBackup() {
   if (!hasToday) await createDataBackup(null, "auto");
 }
 async function audit(userId, action, payload = null) {
-  try { await ins("audit_logs", { user_id: userId || null, action, payload_json: payload ? JSON.stringify(payload) : null, created_at: now() }); } catch (_) {}
+  try { await ins("audit_logs", { user_id: userId || null, action, payload_json: payload ? JSON.stringify(payload) : null, created_at: now() }); } catch (_) { }
 }
 async function role(userId) {
   if (!userId) return null;
@@ -866,7 +884,7 @@ async function receiptPdf(orderId) {
     let pdf; try { pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: "A6" }); } catch (_) { pdf = await win.webContents.printToPDF({ printBackground: true }); }
     const fp = path.join(RECEIPTS_DIR, `receipt-order-${orderId}-${now().replace(/[:.]/g, "-")}.pdf`);
     fs.writeFileSync(fp, pdf);
-    try { await new Promise((r) => win.webContents.print({ silent: false, printBackground: true }, () => r())); } catch (_) {}
+    try { await new Promise((r) => win.webContents.print({ silent: false, printBackground: true }, () => r())); } catch (_) { }
     return fp;
   } finally { if (!win.isDestroyed()) win.destroy(); }
 }
@@ -1623,42 +1641,144 @@ function registerIpc() {
   ipcMain.handle("reports:summary", async (_, p) => {
     try {
       const days = p.range === "monthly" ? 30 : p.range === "weekly" ? 7 : 1;
-      const since = new Date(); since.setDate(since.getDate() - days); const sinceMs = since.getTime();
+      const nowMs = Date.now();
+      const currentSinceMs = nowMs - (days * 24 * 60 * 60 * 1000);
+      const previousSinceMs = nowMs - (2 * days * 24 * 60 * 60 * 1000);
+
       const orders = await q("orders", (x) => x.order("id", { ascending: false }).limit(5000));
-      const paid = orders.filter((o) => o.status === "PAID" && new Date(o.created_at).getTime() >= sinceMs);
-      const sales = { paid_orders: paid.length, gross_sales: paid.reduce((a, o) => a + Number(o.total_cents || 0), 0) };
-      const orderIds = paid.map((o) => o.id); const items = orderIds.length ? await q("order_items", (x) => x.in("order_id", orderIds)) : [];
-      const menuIds = Array.from(new Set(items.map((i) => i.menu_item_id).filter(Boolean))); const menu = menuIds.length ? await q("menu_items", (x) => x.in("id", menuIds)) : []; const mb = new Map(menu.map((m) => [m.id, m]));
-      const top = new Map(); for (const i of items) { const mi = mb.get(i.menu_item_id); const base = mi?.name || "Unknown Item"; const size = String(mi?.size || "").trim(); const n = size ? `${base} (${size})` : base; top.set(n, (top.get(n) || 0) + Number(i.quantity || 0)); }
+      const currentPaid = orders.filter((o) => o.status === "PAID" && new Date(o.created_at).getTime() >= currentSinceMs);
+      const previousPaid = orders.filter((o) => o.status === "PAID" && new Date(o.created_at).getTime() >= previousSinceMs && new Date(o.created_at).getTime() < currentSinceMs);
+
+      const sales = {
+        paid_orders: currentPaid.length,
+        gross_sales: currentPaid.reduce((a, o) => a + Number(o.total_cents || 0), 0)
+      };
+
+      const orderIds = currentPaid.map((o) => o.id);
+      const items = orderIds.length ? await q("order_items", (x) => x.in("order_id", orderIds)) : [];
+      const menuIds = Array.from(new Set(items.map((i) => i.menu_item_id).filter(Boolean)));
+      const menu = menuIds.length ? await q("menu_items", (x) => x.in("id", menuIds)) : [];
+      const mb = new Map(menu.map((m) => [m.id, m]));
+
+      // Cache recipes and ingredients for cost calculation
+      const recipes = await q("recipes", (x) => x.limit(10000));
+      const ingredients = await q("ingredients", (x) => x.limit(5000));
+      const ingById = new Map(ingredients.map((i) => [i.id, i]));
+      const recipesByMenuId = new Map();
+      for (const r of recipes) {
+        const bucket = recipesByMenuId.get(r.menu_item_id) || [];
+        bucket.push(r);
+        recipesByMenuId.set(r.menu_item_id, bucket);
+      }
+
+      function getItemCost(menuItemId) {
+        const itemRecipes = recipesByMenuId.get(menuItemId) || [];
+        return itemRecipes.reduce((sum, r) => {
+          const ing = ingById.get(r.ingredient_id);
+          const unitCost = Number(ing?.unit_cost_cents || 0);
+          return sum + Math.round(unitCost * Number(r.qty_per_item || 0));
+        }, 0);
+      }
+
+      const top = new Map();
+      for (const i of items) {
+        const mi = mb.get(i.menu_item_id);
+        const base = mi?.name || "Unknown Item";
+        const size = String(mi?.size || "").trim();
+        const n = size ? `${base} (${size})` : base;
+        top.set(n, (top.get(n) || 0) + Number(i.quantity || 0));
+      }
       const topItems = Array.from(top.entries()).map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty).slice(0, 5);
-      const users = await q("users", (x) => x.limit(1000)); const ub = new Map(users.map((u) => [u.id, u.username]));
-      const cs = new Map(); for (const o of paid) { const c = ub.get(o.cashier_user_id) || null; const k = c || "-"; const prev = cs.get(k) || { cashier: c, paid_orders: 0, gross_sales: 0 }; prev.paid_orders += 1; prev.gross_sales += Number(o.total_cents || 0); cs.set(k, prev); }
+
+      const users = await q("users", (x) => x.limit(1000));
+      const ub = new Map(users.map((u) => [u.id, u.username]));
+      const cs = new Map();
+      for (const o of currentPaid) {
+        const c = ub.get(o.cashier_user_id) || null;
+        const k = c || "-";
+        const prev = cs.get(k) || { cashier: c, paid_orders: 0, gross_sales: 0 };
+        prev.paid_orders += 1;
+        prev.gross_sales += Number(o.total_cents || 0);
+        cs.set(k, prev);
+      }
       const cashierSales = Array.from(cs.values()).sort((a, b) => b.gross_sales - a.gross_sales);
-      const categoryMargin = Array.from(new Set(menu.map((m) => m.category))).map((cat) => { const catItems = items.filter((i) => mb.get(i.menu_item_id)?.category === cat); const net = catItems.reduce((a, i) => a + Number(i.line_total_cents || 0), 0); return { category: cat, net_sales_cents: net, estimated_cost_cents: 0, gross_margin_cents: net }; });
+
+      const categoryMargin = Array.from(new Set(menu.map((m) => m.category))).map((cat) => {
+        const catItems = items.filter((i) => mb.get(i.menu_item_id)?.category === cat);
+        const net = catItems.reduce((a, i) => a + Number(i.line_total_cents || 0), 0);
+        const cost = catItems.reduce((a, i) => a + (getItemCost(i.menu_item_id) * Number(i.quantity || 0)), 0);
+        return {
+          category: cat,
+          net_sales_cents: net,
+          estimated_cost_cents: cost,
+          gross_margin_cents: net - cost
+        };
+      });
+
       const sizeMarginMap = new Map();
       for (const i of items) {
         const mi = mb.get(i.menu_item_id);
         const category = mi?.category || "-";
         const size = String(mi?.size || "").trim() || "-";
         const key = `${category}||${size}`;
-        const prev = sizeMarginMap.get(key) || { category, size, net_sales_cents: 0, quantity: 0 };
+        const prev = sizeMarginMap.get(key) || { category, size, net_sales_cents: 0, estimated_cost_cents: 0, quantity: 0 };
+        const cost = getItemCost(i.menu_item_id) * Number(i.quantity || 0);
         prev.net_sales_cents += Number(i.line_total_cents || 0);
+        prev.estimated_cost_cents += cost;
         prev.quantity += Number(i.quantity || 0);
         sizeMarginMap.set(key, prev);
       }
-      const sizeMargin = Array.from(sizeMarginMap.values()).sort((a, b) => a.category.localeCompare(b.category) || a.size.localeCompare(b.size));
-      const taxSummary = { taxable_sales_cents: paid.reduce((a, o) => a + Number(o.subtotal_cents || 0), 0), total_discount_cents: paid.reduce((a, o) => a + Number(o.discount_cents || 0), 0), tax_collected_cents: paid.reduce((a, o) => a + Number(o.tax_cents || 0), 0), net_sales_cents: paid.reduce((a, o) => a + Number(o.total_cents || 0), 0) };
-      const sessions = await q("cash_sessions", (x) => x.order("id", { ascending: false }).limit(1000)); const tx = await q("cash_transactions", (x) => x.order("id", { ascending: false }).limit(5000));
+      const sizeMargin = Array.from(sizeMarginMap.values()).map(m => ({ ...m, gross_margin_cents: m.net_sales_cents - m.estimated_cost_cents })).sort((a, b) => a.category.localeCompare(b.category) || a.size.localeCompare(b.size));
+
+      const taxSummary = {
+        taxable_sales_cents: currentPaid.reduce((a, o) => a + Number(o.subtotal_cents || 0), 0),
+        total_discount_cents: currentPaid.reduce((a, o) => a + Number(o.discount_cents || 0), 0),
+        tax_collected_cents: currentPaid.reduce((a, o) => a + Number(o.tax_cents || 0), 0),
+        net_sales_cents: currentPaid.reduce((a, o) => a + Number(o.total_cents || 0), 0),
+        total_cost_cents: items.reduce((a, i) => a + (getItemCost(i.menu_item_id) * Number(i.quantity || 0)), 0)
+      };
+
+      // Comparison Metrics
+      const previousOrderIds = previousPaid.map((o) => o.id);
+      const previousItems = previousOrderIds.length ? await q("order_items", (x) => x.in("order_id", previousOrderIds)) : [];
+      const previousSalesCents = previousPaid.reduce((a, o) => a + Number(o.total_cents || 0), 0);
+      const previousCostCents = previousItems.reduce((a, i) => a + (getItemCost(i.menu_item_id) * Number(i.quantity || 0)), 0);
+      const previousProfitCents = previousSalesCents - previousCostCents;
+      
+      const currentProfitCents = taxSummary.net_sales_cents - taxSummary.total_cost_cents;
+      
+      const calcChange = (curr, prev) => {
+        if (!prev) return curr > 0 ? 100 : 0;
+        return Math.round(((curr - prev) / prev) * 100);
+      };
+
+      const comparison = {
+        salesChangePct: calcChange(taxSummary.net_sales_cents, previousSalesCents),
+        profitChangePct: calcChange(currentProfitCents, previousProfitCents),
+        ordersChangePct: calcChange(currentPaid.length, previousPaid.length)
+      };
+
+      const sessions = await q("cash_sessions", (x) => x.order("id", { ascending: false }).limit(1000));
+      const tx = await q("cash_transactions", (x) => x.order("id", { ascending: false }).limit(5000));
       const openingFloat = sessions.filter((s) => isToday(s.opened_at)).reduce((a, s) => a + Number(s.opening_cents || 0), 0);
       const cashIn = tx.filter((t) => t.transaction_type === "IN" && isToday(t.created_at)).reduce((a, t) => a + Number(t.amount_cents || 0), 0);
       const cashOut = tx.filter((t) => t.transaction_type === "OUT" && isToday(t.created_at)).reduce((a, t) => a + Number(t.amount_cents || 0), 0);
       const actualClose = sessions.filter((s) => s.closed_at && isToday(s.closed_at)).reduce((a, s) => a + Number(s.closing_cents || 0), 0);
-      const eodClose = { openingFloat, cashIn, cashOut, expectedClose: openingFloat + cashIn - cashOut, actualClose, variance: actualClose - (openingFloat + cashIn - cashOut), closedSessions: sessions.filter((s) => s.status === "CLOSED" && s.closed_at && isToday(s.closed_at)).length };
+      const eodClose = {
+        openingFloat,
+        cashIn,
+        cashOut,
+        expectedClose: openingFloat + cashIn - cashOut,
+        actualClose,
+        variance: actualClose - (openingFloat + cashIn - cashOut),
+        closedSessions: sessions.filter((s) => s.status === "CLOSED" && s.closed_at && isToday(s.closed_at)).length
+      };
+
       const lowStock = (await q("ingredients", (x) => x.order("stock_qty", { ascending: true }))).filter((i) => Number(i.stock_qty || 0) <= Number(i.low_stock_threshold || 0));
       const cash = sessions.slice(0, 10);
       const logs = await q("audit_logs", (x) => x.order("id", { ascending: false }).limit(100));
       const auditRows = logs.map((a) => ({ ...a, username: ub.get(a.user_id) || null }));
-      return { ok: true, summary: { sales, topItems, cashierSales, categoryMargin, sizeMargin, taxSummary, eodClose, lowStock, cash, audit: auditRows } };
+      return { ok: true, summary: { sales, topItems, cashierSales, categoryMargin, sizeMargin, taxSummary, comparison, eodClose, lowStock, cash, audit: auditRows } };
     } catch (e) { return { ok: false, error: e.message || "Failed." }; }
   });
 
@@ -1782,7 +1902,7 @@ app.whenReady().then(async () => {
 }).catch((e) => {
   const msg = `Unexpected startup error: ${e.message || e}`;
   console.error(msg);
-  try { dialog.showErrorBox("Startup Error", msg); } catch (_) {}
+  try { dialog.showErrorBox("Startup Error", msg); } catch (_) { }
   app.quit();
 });
 

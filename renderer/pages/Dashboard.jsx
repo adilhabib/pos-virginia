@@ -1,4 +1,4 @@
-(function() {
+(function () {
   const { useState, useEffect } = React;
 
   function DashboardPage() {
@@ -35,7 +35,9 @@
           dailySales,
           monthlySales,
           customerCredit,
-          vendorPayables
+          vendorPayables,
+          comp: dailyResp.summary?.comparison,
+          monthComp: monthlyResp.summary?.comparison
         };
 
         // Top Items from daily summary
@@ -98,16 +100,16 @@
               <h2 className="text-3xl font-extrabold text-gray-800 mb-1 tracking-tight">Dashboard</h2>
               <p className="text-gray-500 font-medium">Welcome back. Here's what's happening today.</p>
             </div>
-            <button 
-              onClick={fetchData} 
+            <button
+              onClick={fetchData}
               className="bg-white border border-gray-200 px-4 py-2 rounded-xl text-gray-600 font-bold hover:bg-gray-50 flex items-center gap-2"
             >
               <span>Refresh</span>
             </button>
           </div>
-          
+
           <KPICards data={data.kpi} />
-          
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
             <div className="lg:col-span-2">
               <SalesChart data={data.salesChart} />
@@ -116,7 +118,7 @@
               <TopItems data={data.topItems} />
             </div>
           </div>
-          
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pb-12">
             <div className="lg:col-span-2">
               <CreditPanel data={data.kpi} />
